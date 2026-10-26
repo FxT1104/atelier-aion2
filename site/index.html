@@ -22,6 +22,7 @@
         <select id="server"><option>Chargement…</option></select>
       </label>
       <span class="chip ghost" id="freshness">Prix : chargement…</span>
+      <button class="btn small-btn" id="myAlerts" type="button" hidden>Mes alertes</button>
     </div>
   </header>
 
@@ -104,6 +105,42 @@
   </section>
 
 </div>
+
+<dialog id="alertDlg" class="dlg" aria-labelledby="alertTitle">
+  <form id="alertForm" class="dlg-body">
+    <h2 id="alertTitle">Alerte Discord</h2>
+    <p class="small" id="alertWhat"></p>
+    <label class="field" for="alertThreshold"><span class="label" id="alertThLabel">Seuil</span>
+      <input id="alertThreshold" type="text" inputmode="decimal" autocomplete="off" placeholder="ex. 80 M">
+    </label>
+    <label class="field" for="alertWebhook"><span class="label">Adresse du webhook Discord</span>
+      <input id="alertWebhook" type="url" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…">
+    </label>
+    <details class="help">
+      <summary>Comment obtenir cette adresse ?</summary>
+      <ol class="small">
+        <li>Sur Discord, clique sur la roue dentée du salon où tu veux recevoir les alertes (« Modifier le salon »).</li>
+        <li>Va dans <b>Intégrations</b> → <b>Webhooks</b> → <b>Nouveau webhook</b>.</li>
+        <li>Clique sur le webhook créé, puis sur <b>Copier l'URL du webhook</b>, et colle-la ici.</li>
+      </ol>
+      <p class="small muted">Il faut le droit « Gérer les webhooks » sur ce salon : le plus simple est d'utiliser ton propre serveur Discord.</p>
+    </details>
+    <p class="small muted">Les prix sont vérifiés toutes les heures. Tu reçois un message quand le seuil est franchi, puis un nouveau seulement si le prix repasse de l'autre côté avant de revenir. Un message de test est envoyé tout de suite.</p>
+    <p class="small" id="alertMsg" role="status"></p>
+    <div class="btn-row end">
+      <button class="btn" type="button" id="alertCancel">Annuler</button>
+      <button class="btn primary" type="submit" id="alertSubmit">Créer l'alerte</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="alertsDlg" class="dlg" aria-labelledby="alertsTitle">
+  <div class="dlg-body">
+    <h2 id="alertsTitle">Mes alertes</h2>
+    <div id="alertsList" class="alerts-list"></div>
+    <div class="btn-row end"><button class="btn" type="button" id="alertsClose">Fermer</button></div>
+  </div>
+</dialog>
 <script src="app.js"></script>
 </body>
 </html>

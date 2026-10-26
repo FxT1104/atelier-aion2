@@ -397,7 +397,7 @@
     const rows = [...acc.map.values()].filter(l => l.t !== "owned").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
     const ownedRows = [...acc.map.values()].filter(l => l.t === "owned");
     const fmtQ = q => Number.isInteger(q) ? nf.format(q) : "≈ " + nf.format(Math.ceil(q));
-    html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><button class="btn small-btn" id="copyList" type="button">Copier la liste</button></div>
+    html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><span class="btn-row">${PROXY && complete && rows.some(l => l.t === "buy") ? `<button class="btn small-btn" id="alertCost" type="button">Alerte Discord</button>` : ""}<button class="btn small-btn" id="copyList" type="button">Copier la liste</button></span></div>
       <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
       <div class="table-wrap"><table class="shoplist${PROXY ? "" : " no-trend"}"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th><th class="r trend-h" title="Prix des 7 derniers jours et écart du prix actuel à sa moyenne">7 derniers jours</th></tr></thead><tbody>
       ${rows.map(l => `<tr class="${l.t === "missing" ? "missing" : ""}"><td class="r num qcol">${fmtQ(l.qty)}</td>
@@ -408,6 +408,12 @@
       ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td><td class="trend"></td></tr>` : ""}
       </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td><td class="trend"></td></tr></tfoot></table></div></div>`;
     BASKET = { rows: rows.filter(l => l.t !== "missing").map(l => ({ id: l.id, qty: l.qty, unit: l.unit, t: l.t })), credit: acc.credit };
+    ALERT_COST = complete ? {
+      kind: "cost", label: g.name + (qty > 1 ? " ×" + qty : ""), current: total,
+      buy: rows.filter(l => l.t === "buy").map(l => [l.id, Math.round(l.qty * 1000) / 1000]),
+      fixed: rows.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0), credit: acc.credit, sell: [],
+      url: location.origin + location.pathname + location.search,
+    } : null;
     window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
     out.innerHTML = html;
     decorate(g);
@@ -584,6 +590,109 @@
     const g = GROUPS.get(goalKey); if (g) { $("chartBody").innerHTML = `<p class="muted small">Chargement de l'historique…</p>`; decorate(g); }
   });
 
+  // ================= Alertes Discord =================
+  let ALERT_COST = null, RENT_SHOWN = [], ALERT_CTX = null;
+  const FACN = { asmodian: "Asmodiens", elyos: "Élyséens" };
+  const serverLabel = () => server ? server.name + " · " + FACN[server.faction] : "";
+  function parseKinah(str) {
+    const m = String(str || "").replace(/\s|\u202f|\u00a0/g, "").replace(",", ".").match(/^(\d+(?:\.\d+)?)(md|m|k)?(?:kinah)?$/i);
+    if (!m) return null;
+    const mult = { md: 1e9, m: 1e6, k: 1e3 }[(m[2] || "").toLowerCase()] || 1;
+    return Math.round(Number(m[1]) * mult);
+  }
+  const roundNice = v => v >= 1e7 ? Math.round(v / 1e6) * 1e6 : v >= 1e5 ? Math.round(v / 1e4) * 1e4 : Math.round(v);
+  const fmtInput = v => v >= 1e6 ? nf2.format(v / 1e6).replace(/,00$/, "") + " M" : nf.format(v);
+  function openAlert(ctx) {
+    ALERT_CTX = ctx;
+    const isCost = ctx.kind === "cost";
+    $("alertTitle").textContent = isCost ? "Alerte sur la liste de courses" : "Alerte de rentabilité";
+    $("alertWhat").innerHTML = `<b>${esc(ctx.label)}</b> sur ${esc(serverLabel())}<br>` +
+      (isCost ? `Liste de courses actuelle : <b class="num">${kinah(ctx.current)}</b> Kinah` : `Bénéfice actuel : <b class="num">${ctx.current >= 0 ? "+" : "−"}${kinah(Math.abs(ctx.current))}</b> Kinah par craft`);
+    $("alertThLabel").textContent = isCost ? "Me prévenir quand la liste de courses passe sous" : "Me prévenir quand le bénéfice par craft dépasse";
+    $("alertThreshold").value = fmtInput(roundNice(isCost ? ctx.current * 0.9 : Math.max(ctx.current * 1.2, ctx.current + 1e6, 1e6)));
+    $("alertWebhook").value = load("atelier-webhook", "");
+    $("alertMsg").textContent = ""; $("alertMsg").className = "small";
+    $("alertSubmit").disabled = false; $("alertSubmit").hidden = false;
+    $("alertDlg").showModal();
+  }
+  $("out").addEventListener("click", e => { if (e.target.closest("#alertCost") && ALERT_COST) openAlert(ALERT_COST); });
+  $("rtable").addEventListener("click", e => {
+    const b = e.target.closest("button[data-alert]"); if (!b) return;
+    const row = RENT_SHOWN[Number(b.dataset.alert)]; if (!row) return;
+    const r = row.r;
+    const S = solve(new Set(), { resale: false });
+    const node = expand(S, r[1], r[2], new Set(), { t: "craft", r }, new Map());
+    const acc = { map: new Map(), credit: 0, fee: 0 }; leaves(node, acc);
+    const ls = [...acc.map.values()];
+    if (ls.some(l => l.t === "missing")) return;
+    const sell = row.combo && row.combo.price != null ? [[r[1], (1 - row.combo.p) * r[2]], [row.combo.id, row.combo.p * r[11][1]]] : [[r[1], r[2]]];
+    openAlert({
+      kind: "profit", label: row.g.name, current: row.profit,
+      buy: ls.filter(l => l.t === "buy").map(l => [l.id, Math.round(l.qty * 1000) / 1000]),
+      fixed: ls.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0), credit: 0,
+      sell: sell.map(([i, w]) => [i, Math.round(w * 1000) / 1000]),
+      url: location.origin + location.pathname + "?s=" + server.id + "&goal=" + r[1],
+    });
+  });
+  $("alertCancel").addEventListener("click", () => $("alertDlg").close());
+  $("alertForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const msg = $("alertMsg"), btn = $("alertSubmit");
+    const webhook = $("alertWebhook").value.trim();
+    const threshold = parseKinah($("alertThreshold").value);
+    if (!/^https:\/\/(ptb\.|canary\.)?(discord|discordapp)\.com\/api\/webhooks\//.test(webhook)) { msg.textContent = "Colle l'adresse complète du webhook Discord (elle commence par https://discord.com/api/webhooks/)."; msg.className = "small err"; return; }
+    if (threshold == null) { msg.textContent = "Seuil invalide : écris un montant comme 80 M ou 2 500 000."; msg.className = "small err"; return; }
+    const c = ALERT_CTX;
+    btn.disabled = true; msg.textContent = "Création de l'alerte et envoi d'un message de test…"; msg.className = "small";
+    try {
+      const res = await fetch(PROXY + "/alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        webhook, kind: c.kind, server: server.id, serverLabel: serverLabel(), label: c.label, url: c.url,
+        buy: c.buy, sell: c.sell, fixed: c.fixed, credit: c.credit, threshold,
+      }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.ok) throw new Error(d.message || "Le relais n'a pas pu créer l'alerte.");
+      save("atelier-webhook", webhook);
+      const list = load("atelier-alerts", []);
+      list.push({ id: d.id, key: d.key, label: c.label, kind: c.kind, threshold, serverLabel: serverLabel(), url: c.url, created: new Date().toISOString() });
+      save("atelier-alerts", list); updateAlertCount();
+      msg.textContent = "Alerte créée. Un message de test vient d'arriver sur ton salon Discord. Les prix sont vérifiés toutes les heures.";
+      msg.className = "small ok"; btn.hidden = true; $("alertCancel").textContent = "Fermer";
+    } catch (err) {
+      msg.textContent = err.message; msg.className = "small err"; btn.disabled = false;
+    }
+  });
+  function updateAlertCount() {
+    const n = load("atelier-alerts", []).length;
+    $("myAlerts").hidden = !PROXY;
+    $("myAlerts").textContent = n ? `Mes alertes (${n})` : "Mes alertes";
+  }
+  async function openMyAlerts() {
+    const box = $("alertsList"), list = load("atelier-alerts", []);
+    $("alertsDlg").showModal();
+    if (!list.length) { box.innerHTML = `<p class="muted">Aucune alerte pour l'instant. Crée-en une depuis la liste de courses (bouton « Alerte Discord ») ou depuis l'onglet Rentabilité.</p>`; return; }
+    box.innerHTML = list.map((a, i) => `<div class="alert-item" id="al-${i}"><div><b>${esc(a.label)}</b><div class="small muted">${esc(a.serverLabel)} · ${a.kind === "cost" ? "liste de courses sous " : "bénéfice au-dessus de "}<span class="num">${kinah(a.threshold)}</span></div><div class="small" data-status>Vérification…</div></div>
+      <div class="btn-row"><a class="btn small-btn" href="${esc(a.url)}">Ouvrir</a><button class="btn small-btn" type="button" data-del="${i}">Supprimer</button></div></div>`).join("");
+    list.forEach(async (a, i) => {
+      const el = document.querySelector(`#al-${i} [data-status]`);
+      try {
+        const res = await fetch(`${PROXY}/alerts/${a.id}?key=${a.key}`);
+        if (res.status === 404) { el.textContent = "Alerte supprimée (le webhook Discord n'existe plus ?)."; el.className = "small err"; return; }
+        const d = await res.json();
+        const v = d.current == null ? "valeur indisponible" : (a.kind === "cost" ? "actuellement " + kinah(d.current) : "actuellement " + (d.current >= 0 ? "+" : "−") + kinah(Math.abs(d.current)));
+        el.innerHTML = `${esc(v)}${d.lastSent ? " · dernier message le " + new Date(d.lastSent).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}`;
+      } catch (e) { el.textContent = "Relais injoignable pour le moment."; }
+    });
+  }
+  $("myAlerts").addEventListener("click", openMyAlerts);
+  $("alertsClose").addEventListener("click", () => $("alertsDlg").close());
+  $("alertsList").addEventListener("click", async e => {
+    const b = e.target.closest("button[data-del]"); if (!b) return;
+    const list = load("atelier-alerts", []); const a = list[Number(b.dataset.del)]; if (!a) return;
+    b.disabled = true; b.textContent = "Suppression…";
+    try { await fetch(`${PROXY}/alerts/${a.id}?key=${a.key}`, { method: "DELETE" }); } catch (err) {}
+    save("atelier-alerts", list.filter(x => x.id !== a.id)); updateAlertCount(); openMyAlerts();
+  });
+
   // ================= Onglet prix =================
   function renderPrices() {
     const q = $("psearch").value;
@@ -668,7 +777,7 @@
         combo = { id: r[11][0], p, price: cp };
       }
       const profit = revenue - cost;
-      const row = { g, id: out, price, revenue, cost, profit, margin: profit / cost, listings, combo, qty: r[2], prof: r[4], mastery: r[5] };
+      const row = { g, id: out, price, revenue, cost, profit, margin: profit / cost, listings, combo, qty: r[2], prof: r[4], mastery: r[5], r };
       const prev = best.get(g.key);
       if (!prev || row.profit > prev.profit) best.set(g.key, row);
     }
@@ -681,6 +790,7 @@
       ? `<p class="small"><b>${good.length}</b> craft${good.length > 1 ? "s" : ""} rentable${good.length > 1 ? "s" : ""} sur ${rows.length} objets en vente sur ${esc(server.name)}${top ? `. Le plus rentable : <b>${esc(top.g.name)}</b> (+${kinah(top.profit)} par craft)` : ""}.</p>`
       : `<div class="empty">Aucun objet ne correspond à ces filtres.</div>`;
     const shown = rows.slice(0, 150);
+    RENT_SHOWN = [];
     let html = `<thead><tr><th>Objet</th><th class="r">Coût des matériaux</th><th class="r">Vente HV</th><th class="r">Bénéfice par craft</th><th class="r">Marge</th><th class="r">Annonces</th><th></th></tr></thead><tbody>`;
     for (const r of shown) {
       const pos = r.profit > 0;
@@ -692,7 +802,8 @@
         <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"} ${kinah(Math.abs(r.profit))}</td>
         <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"}${Math.abs(Math.round(r.margin * 100))} %</td>
         <td class="r num muted">${r.listings != null ? r.listings : "—"}</td>
-        <td class="r"><button class="linkish" type="button" data-goal="${esc(r.g.key)}">Détail</button></td></tr>`;
+        <td class="r nowrap"><button class="linkish" type="button" data-goal="${esc(r.g.key)}">Détail</button>${PROXY ? ` · <button class="linkish" type="button" data-alert="${RENT_SHOWN.length}">Alerte</button>` : ""}</td></tr>`;
+      RENT_SHOWN.push(r);
     }
     if (rows.length > shown.length) html += `<tr><td colspan="7" class="muted small">${rows.length - shown.length} autres objets : affine la recherche.</td></tr>`;
     $("rtable").innerHTML = rows.length ? html + "</tbody>" : "";
@@ -749,6 +860,7 @@
       const [cat, srv] = await Promise.all([fetch("data/catalog.json", { cache: "no-cache" }).then(r => r.json()), fetch("data/servers.json", { cache: "no-cache" }).then(r => r.json())]);
       CAT = cat; SERVERS = srv.servers;
       try { const cfg = await fetch("config.json", { cache: "no-cache" }).then(r => r.json()); PROXY = String(cfg.proxy || "").replace(/\/$/, ""); } catch (e) { PROXY = ""; }
+      updateAlertCount();
     } catch (e) {
       $("out").innerHTML = `<p class="notice">Les données n'ont pas pu être chargées. Recharge la page dans un instant.</p>`; return;
     }
