@@ -471,7 +471,10 @@
   }
   // Coût de la liste de courses au fil du temps : somme des matériaux × leur prix à chaque instant.
   function basketSeries(hist, days) {
-    const now = Math.floor(Date.now() / 1000), t0 = now - days * 86400, N = 140;
+    const now = Math.floor(Date.now() / 1000), N = 140;
+    // On commence quand tous les matériaux suivis ont un prix connu, pour ne rien inventer.
+    let t0 = now - days * 86400;
+    for (const r of BASKET.rows) { const h = r.t === "buy" ? hist[r.id] : null; if (h && h.obs && h.obs.length) t0 = Math.max(t0, h.obs[0][0]); }
     const grid = Array.from({ length: N + 1 }, (_, i) => Math.round(t0 + (now - t0) * i / N));
     const vals = grid.map(() => -BASKET.credit);
     let tracked = 0;
@@ -486,7 +489,7 @@
     return { pts: grid.map((t, i) => [t, vals[i]]), tracked };
   }
   function itemSeries(obs, days) {
-    const now = Math.floor(Date.now() / 1000), t0 = now - days * 86400, N = 140;
+    const now = Math.floor(Date.now() / 1000), t0 = Math.max(now - days * 86400, obs[0][0]), N = 140;
     const k = { i: 0 };
     return Array.from({ length: N + 1 }, (_, i) => { const t = Math.round(t0 + (now - t0) * i / N); return [t, priceAt(obs, t, k)]; });
   }
@@ -558,7 +561,7 @@
     const lo = Math.min(...all), hi = Math.max(...all);
     const pad = (hi - lo) * 0.12 || hi * 0.05 || 1;
     const y0 = Math.max(0, lo - pad), y1 = hi + pad;
-    const t0 = series[0].pts[0][0], t1 = series[0].pts[series[0].pts.length - 1][0];
+    const t0 = Math.min(...series.map(s => s.pts[0][0])), t1 = Math.max(...series.map(s => s.pts[s.pts.length - 1][0]));
     const X = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
     const Y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
     const ticks = [y0 + (y1 - y0) * 0.1, (y0 + y1) / 2, y1 - (y1 - y0) * 0.1];
