@@ -401,7 +401,7 @@
       <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
       <div class="table-wrap"><table class="shoplist${PROXY ? "" : " no-trend"}"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th><th class="r trend-h" title="Prix des 7 derniers jours et écart du prix actuel à sa moyenne">7 derniers jours</th></tr></thead><tbody>
       ${rows.map(l => `<tr class="${l.t === "missing" ? "missing" : ""}"><td class="r num qcol">${fmtQ(l.qty)}</td>
-        <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
+        <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}${PROXY && l.t === "buy" ? `<button class="bell" type="button" data-palert="${l.id}" title="Me prévenir quand ce matériau passe sous un prix" aria-label="Alerte bonne affaire sur ${esc(nameOf(l.id))}">alerte</button>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
         <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
         <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td><td class="r trend" ${l.t === "buy" ? `data-trend="${l.id}"` : ""}></td></tr>`).join("")}
       ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td><td class="trend"></td></tr>`).join("")}
@@ -604,18 +604,31 @@
   const fmtInput = v => v >= 1e6 ? nf2.format(v / 1e6).replace(/,00$/, "") + " M" : nf.format(v);
   function openAlert(ctx) {
     ALERT_CTX = ctx;
-    const isCost = ctx.kind === "cost";
-    $("alertTitle").textContent = isCost ? "Alerte sur la liste de courses" : "Alerte de rentabilité";
-    $("alertWhat").innerHTML = `<b>${esc(ctx.label)}</b> sur ${esc(serverLabel())}<br>` +
-      (isCost ? `Liste de courses actuelle : <b class="num">${kinah(ctx.current)}</b> Kinah` : `Bénéfice actuel : <b class="num">${ctx.current >= 0 ? "+" : "−"}${kinah(Math.abs(ctx.current))}</b> Kinah par craft`);
-    $("alertThLabel").textContent = isCost ? "Me prévenir quand la liste de courses passe sous" : "Me prévenir quand le bénéfice par craft dépasse";
-    $("alertThreshold").value = fmtInput(roundNice(isCost ? ctx.current * 0.9 : Math.max(ctx.current * 1.2, ctx.current + 1e6, 1e6)));
+    const k = ctx.kind, isCost = k !== "profit";
+    $("alertTitle").textContent = { cost: "Alerte sur la liste de courses", price: "Alerte bonne affaire", profit: "Alerte de rentabilité" }[k];
+    $("alertWhat").innerHTML = `<b>${esc(ctx.label)}</b> sur ${esc(serverLabel())}<br>` + ({
+      cost: `Liste de courses actuelle : <b class="num">${kinah(ctx.current)}</b> Kinah`,
+      price: `Prix le plus bas actuel : <b class="num">${kinah(ctx.current)}</b> Kinah${ctx.avg ? ` · moyenne 7 jours : <span class="num">${kinah(ctx.avg)}</span>` : ""}`,
+      profit: `Bénéfice actuel : <b class="num">${ctx.current >= 0 ? "+" : "−"}${kinah(Math.abs(ctx.current))}</b> Kinah par craft`,
+    })[k];
+    $("alertThLabel").textContent = { cost: "Me prévenir quand la liste de courses passe sous", price: "Me prévenir quand le prix passe sous", profit: "Me prévenir quand le bénéfice par craft dépasse" }[k];
+    const base = k === "price" && ctx.avg ? Math.min(ctx.current, ctx.avg) : ctx.current;
+    $("alertThreshold").value = fmtInput(roundNice(isCost ? base * 0.9 : Math.max(ctx.current * 1.2, ctx.current + 1e6, 1e6)));
     $("alertWebhook").value = load("atelier-webhook", "");
     $("alertMsg").textContent = ""; $("alertMsg").className = "small";
     $("alertSubmit").disabled = false; $("alertSubmit").hidden = false;
     $("alertDlg").showModal();
   }
   $("out").addEventListener("click", e => { if (e.target.closest("#alertCost") && ALERT_COST) openAlert(ALERT_COST); });
+  // Alerte « bonne affaire » sur un seul objet
+  function openPriceAlert(id) {
+    const p = mkt(id); if (p == null || !PROXY) return;
+    const h = HIST.get(server.id + "|7|" + id);
+    const avg = h && h.obs && h.obs.length > 2 ? h.obs.reduce((a, o) => a + o[1], 0) / h.obs.length : null;
+    openAlert({ kind: "price", label: nameOf(id), current: p, avg, buy: [[id, 1]], fixed: 0, credit: 0, sell: [],
+      url: location.origin + location.pathname + "?s=" + server.id + "&goal=" + id });
+  }
+  document.addEventListener("click", e => { const b = e.target.closest("button[data-palert]"); if (b) openPriceAlert(Number(b.dataset.palert)); });
   $("rtable").addEventListener("click", e => {
     const b = e.target.closest("button[data-alert]"); if (!b) return;
     const row = RENT_SHOWN[Number(b.dataset.alert)]; if (!row) return;
@@ -670,7 +683,7 @@
     const box = $("alertsList"), list = load("atelier-alerts", []);
     $("alertsDlg").showModal();
     if (!list.length) { box.innerHTML = `<p class="muted">Aucune alerte pour l'instant. Crée-en une depuis la liste de courses (bouton « Alerte Discord ») ou depuis l'onglet Rentabilité.</p>`; return; }
-    box.innerHTML = list.map((a, i) => `<div class="alert-item" id="al-${i}"><div><b>${esc(a.label)}</b><div class="small muted">${esc(a.serverLabel)} · ${a.kind === "cost" ? "liste de courses sous " : "bénéfice au-dessus de "}<span class="num">${kinah(a.threshold)}</span></div><div class="small" data-status>Vérification…</div></div>
+    box.innerHTML = list.map((a, i) => `<div class="alert-item" id="al-${i}"><div><b>${esc(a.label)}</b><div class="small muted">${esc(a.serverLabel)} · ${{ cost: "liste de courses sous ", price: "prix sous ", profit: "bénéfice au-dessus de " }[a.kind]}<span class="num">${kinah(a.threshold)}</span></div><div class="small" data-status>Vérification…</div></div>
       <div class="btn-row"><a class="btn small-btn" href="${esc(a.url)}">Ouvrir</a><button class="btn small-btn" type="button" data-del="${i}">Supprimer</button></div></div>`).join("");
     list.forEach(async (a, i) => {
       const el = document.querySelector(`#al-${i} [data-status]`);
@@ -678,7 +691,7 @@
         const res = await fetch(`${PROXY}/alerts/${a.id}?key=${a.key}`);
         if (res.status === 404) { el.textContent = "Alerte supprimée (le webhook Discord n'existe plus ?)."; el.className = "small err"; return; }
         const d = await res.json();
-        const v = d.current == null ? "valeur indisponible" : (a.kind === "cost" ? "actuellement " + kinah(d.current) : "actuellement " + (d.current >= 0 ? "+" : "−") + kinah(Math.abs(d.current)));
+        const v = d.current == null ? "valeur indisponible" : (a.kind !== "profit" ? "actuellement " + kinah(d.current) : "actuellement " + (d.current >= 0 ? "+" : "−") + kinah(Math.abs(d.current)));
         el.innerHTML = `${esc(v)}${d.lastSent ? " · dernier message le " + new Date(d.lastSent).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}`;
       } catch (e) { el.textContent = "Relais injoignable pour le moment."; }
     });
@@ -706,7 +719,7 @@
       const v = overrides[id] != null ? overrides[id] : p ? p[0] : "";
       const bc = g.craftable ? bestCraft(S, g.ids) : null;
       const npc = CAT.npc[id] && npcPrice(id) != null ? ` · PNJ ${kinah(npcPrice(id))}` : "";
-      html += `<tr><td>${gdot(id)}${esc(g.name)}${lvlTag(g.lvl)}<span class="en">${esc(g.en)}${npc}</span></td>
+      html += `<tr><td>${gdot(id)}${esc(g.name)}${lvlTag(g.lvl)}${PROXY && p ? `<button class="bell" type="button" data-palert="${id}" title="Me prévenir quand cet objet passe sous un prix" aria-label="Alerte bonne affaire sur ${esc(g.name)}">alerte</button>` : ""}<span class="en">${esc(g.en)}${npc}</span></td>
         <td class="r"><input id="p-${id}" data-id="${id}" inputmode="numeric" value="${v}" placeholder="aucune annonce" class="${overrides[id] != null ? "edited" : ""}" aria-label="Prix de ${esc(g.name)}"></td>
         <td class="r num muted">${p && p[1] != null ? p[1] : "—"}</td>
         <td class="r">${bc ? `<span class="num">${kinah(bc.unit)}</span><br><button class="linkish" type="button" data-goal="${esc(g.key)}">Détail</button>` : `<span class="muted">—</span>`}</td></tr>`;

@@ -112,7 +112,7 @@ function evaluate(a, prices) {
     if (p == null) return { value: null, missing: id };
     cost += q * p;
   }
-  if (a.kind === "cost") return { value: cost };
+  if (a.kind !== "profit") return { value: cost };
   let revenue = 0;
   for (const [id, w] of a.sell) {
     const p = prices[id];
@@ -121,9 +121,9 @@ function evaluate(a, prices) {
   }
   return { value: revenue - cost };
 }
-const hits = (a, v) => a.kind === "cost" ? v <= a.threshold : v >= a.threshold;
+const hits = (a, v) => a.kind !== "profit" ? v <= a.threshold : v >= a.threshold;
 // Pour éviter les messages en boucle : l'alerte se réarme quand on repasse nettement de l'autre côté du seuil.
-const rearms = (a, v) => a.kind === "cost" ? v > a.threshold * 1.02 : v < a.threshold - Math.abs(a.threshold) * 0.02;
+const rearms = (a, v) => a.kind !== "profit" ? v > a.threshold * 1.02 : v < a.threshold - Math.abs(a.threshold) * 0.02;
 
 // ================= Création / lecture / suppression =================
 async function createAlert(request, env, cors) {
@@ -133,7 +133,8 @@ async function createAlert(request, env, cors) {
   const num = v => typeof v === "number" && isFinite(v);
   const pairs = (arr, max) => Array.isArray(arr) && arr.length <= max && arr.every(x => Array.isArray(x) && x.length === 2 && Number.isInteger(x[0]) && x[0] > 0 && num(x[1]) && x[1] > 0);
   if (typeof b.webhook !== "string" || !WEBHOOK_RE.test(b.webhook.trim())) return err("Adresse de webhook Discord invalide.");
-  if (!["cost", "profit"].includes(b.kind)) return err("Type d'alerte inconnu.");
+  if (!["cost", "profit", "price"].includes(b.kind)) return err("Type d'alerte inconnu.");
+  if (b.kind === "price" && (!Array.isArray(b.buy) || b.buy.length !== 1)) return err("Une alerte de prix porte sur un seul objet.");
   if (typeof b.server !== "string" || !/^\d{1,6}$/.test(b.server)) return err("Serveur invalide.");
   if (!pairs(b.buy, 80) || !b.buy.length) return err("Liste de courses invalide.");
   if (b.kind === "profit" && (!pairs(b.sell, 4) || !b.sell.length)) return err("Objet vendu invalide.");
@@ -160,9 +161,11 @@ async function createAlert(request, env, cors) {
     title: "Alerte enregistrée : " + (label || "craft"),
     url: link,
     color: 0x563a86,
-    description: (alert.kind === "cost"
-      ? `Je te préviens ici quand ta liste de courses passe sous **${kinah(alert.threshold)}** Kinah`
-      : `Je te préviens ici quand ce craft rapporte plus de **${kinah(alert.threshold)}** Kinah`) +
+    description: ({
+      cost: `Je te préviens ici quand ta liste de courses passe sous **${kinah(alert.threshold)}** Kinah`,
+      price: `Je te préviens ici quand le prix passe sous **${kinah(alert.threshold)}** Kinah`,
+      profit: `Je te préviens ici quand ce craft rapporte plus de **${kinah(alert.threshold)}** Kinah`,
+    })[alert.kind] +
       (serverLabel ? ` sur ${serverLabel}` : "") + "." + (current != null ? `\nValeur actuelle : **${kinah(current)}** Kinah.` : "") +
       "\nVérification toutes les 5 minutes.",
   });
@@ -217,12 +220,14 @@ async function checkAlerts(env) {
     if (value == null) continue;
     if (!a.triggered && hits(a, value)) {
       const res = await discord(a.webhook, {
-        title: a.kind === "cost" ? `${a.label} : ${kinah(value)} Kinah` : `${a.label} : +${kinah(value)} Kinah par craft`,
+        title: a.kind === "profit" ? `${a.label} : +${kinah(value)} Kinah par craft` : `${a.label} : ${kinah(value)} Kinah`,
         url: a.url,
-        color: a.kind === "cost" ? 0x2f7a52 : 0xb07d00,
-        description: a.kind === "cost"
-          ? `Ta liste de courses est passée sous ton seuil de **${kinah(a.threshold)}** Kinah${a.serverLabel ? " sur " + a.serverLabel : ""}. C'est le moment d'acheter !`
-          : `Ce craft rapporte maintenant plus que ton seuil de **${kinah(a.threshold)}** Kinah${a.serverLabel ? " sur " + a.serverLabel : ""}.`,
+        color: a.kind === "profit" ? 0xb07d00 : 0x2f7a52,
+        description: ({
+          cost: `Ta liste de courses est passée sous ton seuil de **${kinah(a.threshold)}** Kinah`,
+          price: `Bonne affaire : le prix le plus bas est passé sous ton seuil de **${kinah(a.threshold)}** Kinah`,
+          profit: `Ce craft rapporte maintenant plus que ton seuil de **${kinah(a.threshold)}** Kinah`,
+        })[a.kind] + (a.serverLabel ? " sur " + a.serverLabel : "") + (a.kind === "profit" ? "." : ". C'est le moment d'acheter !"),
       });
       if (res.gone) { await env.ALERTS.delete(k.name); continue; }
       if (res.ok) { a.triggered = true; a.lastSent = new Date().toISOString(); await env.ALERTS.put(k.name, JSON.stringify(a), { metadata: k.metadata }); }

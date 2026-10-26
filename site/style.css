@@ -213,3 +213,5 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 #alertMsg.err, .alerts-list .err { color: var(--bad); }
 .alerts-list { display: grid; gap: 10px; }
 .alert-item { display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.bell { margin-left: 8px; border: 1px solid var(--line); background: transparent; color: var(--plum); border-radius: 999px; padding: 0 8px; font-size: .72rem; line-height: 1.6; vertical-align: middle; }
+.bell:hover { background: var(--plum-soft); border-color: transparent; }
