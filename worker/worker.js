@@ -38,7 +38,7 @@ export default {
 };
 
 async function history(item, server, days, ctx) {
-  const key = new Request(`https://cache.atelier-aion2/history?item=${item}&server=${server}&days=${days}`);
+  const key = new Request(`https://cache.atelier-aion2/v2/history?item=${item}&server=${server}&days=${days}`);
   const cache = caches.default;
   const hit = await cache.match(key);
   if (hit) return hit.json();
@@ -49,10 +49,16 @@ async function history(item, server, days, ctx) {
     });
     if (!res.ok) return null;
     const raw = await res.json();
-    // Version compacte : [horodatage en secondes, prix, annonces]
-    const obs = (raw.observations || [])
-      .filter(o => o.price != null)
-      .map(o => [Math.round(Date.parse(o.observedAt) / 1000), Math.round(Number(o.price)), o.listings == null ? null : Number(o.listings)]);
+    // Version compacte : [horodatage en secondes, prix, annonces].
+    // Avant « hourly.until », A2-Tracker donne un prix le plus bas par heure ; ensuite, chaque relevé.
+    const toSec = d => Math.round(Date.parse(d) / 1000);
+    const hourly = raw.hourly && Array.isArray(raw.hourly.hours) ? raw.hourly.hours : [];
+    const until = raw.hourly && raw.hourly.until ? toSec(raw.hourly.until) : 0;
+    const obs = [];
+    if (raw.carryIn && raw.carryIn.price != null) obs.push([toSec(raw.period && raw.period.since ? raw.period.since : raw.carryIn.observedAt), Math.round(Number(raw.carryIn.price)), raw.carryIn.listings == null ? null : Number(raw.carryIn.listings)]);
+    for (const h of hourly) if (h.lowest != null && toSec(h.hourStart) < until) obs.push([toSec(h.hourStart), Math.round(Number(h.lowest)), null]);
+    for (const o of raw.observations || []) if (o.price != null) obs.push([toSec(o.observedAt), Math.round(Number(o.price)), o.listings == null ? null : Number(o.listings)]);
+    obs.sort((a, b) => a[0] - b[0]);
     data = { obs };
   } catch (e) {
     return null;
