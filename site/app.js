@@ -367,6 +367,7 @@
       out.innerHTML = `<div class="result"><div>${head}<div class="label">Coût de fabrication</div><div class="total">Impossible</div>
         <div class="muted small">Il manque le prix d'au moins un matériau sur ce serveur, ou l'objet ne se fabrique pas pour ta faction. Tu peux entrer un prix à la main dans l'onglet « Prix du marché ».</div></div>
         <div class="side">${buy ? `<span class="label">Achat direct</span><span class="num">${kinah(buy.p * qty)}</span>` : ""}</div></div>` + chartSlot(g) + missingList(S, g);
+      BASKET = { rows: [], credit: 0 };
       decorate(g);
       return;
     }
@@ -398,7 +399,7 @@
     const fmtQ = q => Number.isInteger(q) ? nf.format(q) : "≈ " + nf.format(Math.ceil(q));
     html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><button class="btn small-btn" id="copyList" type="button">Copier la liste</button></div>
       <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
-      <div class="table-wrap"><table class="shoplist${PROXY ? "" : " no-trend"}"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th><th class="r trend-h" title="Prix actuel comparé à sa moyenne des 7 derniers jours">vs 7 j</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="shoplist${PROXY ? "" : " no-trend"}"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th><th class="r trend-h" title="Prix des 7 derniers jours et écart du prix actuel à sa moyenne">7 derniers jours</th></tr></thead><tbody>
       ${rows.map(l => `<tr class="${l.t === "missing" ? "missing" : ""}"><td class="r num qcol">${fmtQ(l.qty)}</td>
         <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
         <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
@@ -406,6 +407,7 @@
       ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td><td class="trend"></td></tr>`).join("")}
       ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td><td class="trend"></td></tr>` : ""}
       </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td><td class="trend"></td></tr></tfoot></table></div></div>`;
+    BASKET = { rows: rows.filter(l => l.t !== "missing").map(l => ({ id: l.id, qty: l.qty, unit: l.unit, t: l.t })), credit: acc.credit };
     window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
     out.innerHTML = html;
     decorate(g);
@@ -427,90 +429,150 @@
   }
 
   // ================= Historique des prix (relais Cloudflare) =================
-  let PROXY = "", histDays = 7, decoSeq = 0;
+  let PROXY = "", histDays = 7, decoSeq = 0, BASKET = { rows: [], credit: 0 };
   const HIST = new Map(); // "serveur|jours|id" → { obs } ou null
   const marketId = g => g.ids.find(id => PR.prices[id]) || null;
   function chartSlot(g) {
     if (!PROXY) return "";
-    const id = marketId(g);
-    if (!id) return `<div class="chart-card"><div class="chart-head"><h2>Prix sur l'hôtel des ventes</h2></div><p class="muted small">Pas d'historique : cet objet n'est pas en vente sur ce serveur.</p></div>`;
     return `<div class="chart-card" id="chartCard"><div class="chart-head"><h2>Est-ce le bon moment ?</h2>
       <div class="seg" role="group" aria-label="Période">${[1, 7, 30].map(d => `<button type="button" data-days="${d}" aria-pressed="${d === histDays}">${d === 1 ? "24 h" : d + " j"}</button>`).join("")}</div></div>
       <div id="chartBody" class="chart-body"><p class="muted small">Chargement de l'historique…</p></div></div>`;
   }
   async function getHistory(ids, days) {
-    const want = ids.filter(id => !HIST.has(server.id + "|" + days + "|" + id));
+    const want = [...new Set(ids)].filter(id => !HIST.has(server.id + "|" + days + "|" + id));
     for (let i = 0; i < want.length; i += 30) {
       const chunk = want.slice(i, i + 30);
       try {
         const res = await fetch(`${PROXY}/history?server=${server.id}&days=${days}&items=${chunk.join(",")}`);
         const d = res.ok ? await res.json() : null;
-        for (const id of chunk) HIST.set(server.id + "|" + days + "|" + id, d && d.items ? d.items[id] || null : null);
+        for (const id of chunk) {
+          const h = d && d.items ? d.items[id] : null;
+          if (h && h.obs) h.obs.sort((a, b) => a[0] - b[0]);
+          HIST.set(server.id + "|" + days + "|" + id, h || null);
+        }
       } catch (e) {
         for (const id of chunk) HIST.set(server.id + "|" + days + "|" + id, null);
       }
     }
     return Object.fromEntries(ids.map(id => [id, HIST.get(server.id + "|" + days + "|" + id)]));
   }
-  function stats(obs, current) {
-    const prices = obs.map(o => o[1]);
-    if (!prices.length) return null;
-    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
-    const min = Math.min(...prices), max = Math.max(...prices);
-    const cur = current != null ? current : prices[prices.length - 1];
-    const below = prices.filter(p => p < cur).length / prices.length;
-    return { avg, min, max, cur, diff: (cur - avg) / avg, below, n: prices.length };
+  function stats(values, current) {
+    if (!values.length) return null;
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const min = Math.min(...values), max = Math.max(...values);
+    const cur = current != null ? current : values[values.length - 1];
+    const below = values.filter(v => v < cur).length / values.length;
+    return { avg, min, max, cur, diff: avg ? (cur - avg) / avg : 0, below, n: values.length };
+  }
+  // Prix d'un objet à l'instant t : dernier relevé connu (ou le premier si l'historique commence plus tard).
+  function priceAt(obs, t, k) {
+    while (k.i + 1 < obs.length && obs[k.i + 1][0] <= t) k.i++;
+    return obs[k.i][1];
+  }
+  // Coût de la liste de courses au fil du temps : somme des matériaux × leur prix à chaque instant.
+  function basketSeries(hist, days) {
+    const now = Math.floor(Date.now() / 1000), t0 = now - days * 86400, N = 140;
+    const grid = Array.from({ length: N + 1 }, (_, i) => Math.round(t0 + (now - t0) * i / N));
+    const vals = grid.map(() => -BASKET.credit);
+    let tracked = 0;
+    for (const r of BASKET.rows) {
+      const h = r.t === "buy" ? hist[r.id] : null;
+      if (h && h.obs && h.obs.length) {
+        tracked++;
+        const k = { i: 0 };
+        grid.forEach((t, i) => { vals[i] += r.qty * priceAt(h.obs, t, k); });
+      } else grid.forEach((t, i) => { vals[i] += r.qty * (r.unit || 0); });
+    }
+    return { pts: grid.map((t, i) => [t, vals[i]]), tracked };
+  }
+  function itemSeries(obs, days) {
+    const now = Math.floor(Date.now() / 1000), t0 = now - days * 86400, N = 140;
+    const k = { i: 0 };
+    return Array.from({ length: N + 1 }, (_, i) => { const t = Math.round(t0 + (now - t0) * i / N); return [t, priceAt(obs, t, k)]; });
+  }
+  function verdictOf(st) {
+    return st.below <= 0.25 ? ["good", "bas"] : st.below >= 0.75 ? ["warn", "élevé"] : ["ghost", "normal"];
+  }
+  function diffText(st, period) {
+    const pct = Math.round(st.diff * 100);
+    return `${pct === 0 ? "égal à" : Math.abs(pct) + " % " + (pct < 0 ? "sous" : "au-dessus de")} sa moyenne sur ${period} (<span class="num">${kinah(st.avg)}</span>)`;
+  }
+  function spark(obs) {
+    if (!obs || obs.length < 2) return "";
+    const W = 64, H = 18, t0 = obs[0][0], t1 = Math.floor(Date.now() / 1000);
+    const vs = obs.map(o => o[1]), lo = Math.min(...vs), hi = Math.max(...vs) || 1;
+    const X = t => (t - t0) / Math.max(1, t1 - t0) * (W - 3);
+    const Y = v => hi === lo ? H / 2 : 2 + (1 - (v - lo) / (hi - lo)) * (H - 4);
+    let d = ""; obs.forEach((o, i) => { d += i ? `H${X(o[0]).toFixed(1)}V${Y(o[1]).toFixed(1)}` : `M0,${Y(o[1]).toFixed(1)}`; });
+    d += `H${(W - 3).toFixed(1)}`;
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><path d="${d}"/><circle cx="${W - 3}" cy="${Y(vs[vs.length - 1]).toFixed(1)}" r="2"/></svg>`;
   }
   async function decorate(g) {
     if (!PROXY || !server) return;
     const seq = ++decoSeq;
-    const id = marketId(g);
-    const trendIds = [...document.querySelectorAll("[data-trend]")].map(td => Number(td.dataset.trend));
-    const days = histDays;
-    const [h7, hd] = await Promise.all([getHistory(trendIds, 7), id ? getHistory([id], days) : Promise.resolve({})]);
+    const days = histDays, period = days === 1 ? "24 h" : days + " jours";
+    const mid = marketId(g);
+    const buyIds = BASKET.rows.filter(r => r.t === "buy").map(r => r.id);
+    const ids = mid ? [...buyIds, mid] : buyIds;
+    const [h7, hd] = await Promise.all([getHistory(buyIds, 7), getHistory(ids, days)]);
     if (seq !== decoSeq) return;
+    // Colonne de la liste de courses : mini-courbe 7 jours + écart à la moyenne
     for (const td of document.querySelectorAll("[data-trend]")) {
       const tid = Number(td.dataset.trend), h = h7[tid];
-      const st = h && h.obs && h.obs.length > 2 ? stats(h.obs, mkt(tid)) : null;
-      if (!st) { td.innerHTML = `<span class="muted small">—</span>`; continue; }
+      const st = h && h.obs && h.obs.length > 2 ? stats(h.obs.map(o => o[1]), mkt(tid)) : null;
+      if (!st) { td.innerHTML = `<span class="muted small">pas d'historique</span>`; continue; }
       const pct = Math.round(st.diff * 100);
       const cls = pct <= -5 ? "good" : pct >= 5 ? "warn" : "ghost";
-      td.innerHTML = `<span class="chip ${cls}" title="Moyenne 7 j : ${kinah(st.avg)} · min ${kinah(st.min)} · max ${kinah(st.max)}">${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)} %</span>`;
+      td.innerHTML = `<span class="trend-cell">${spark(h.obs)}<span class="chip ${cls}" title="Moyenne 7 j : ${kinah(st.avg)} · min ${kinah(st.min)} · max ${kinah(st.max)}">${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)} %</span></span>`;
     }
     const body = $("chartBody");
-    if (!id || !body) return;
-    const h = hd[id];
-    if (!h || !h.obs || h.obs.length < 2) { body.innerHTML = `<p class="muted small">Pas assez de relevés sur cette période pour tracer la courbe.</p>`; return; }
-    const st = stats(h.obs, mkt(id));
-    const pct = Math.round(st.diff * 100);
-    const verdict = st.below <= 0.25 ? ["good", "Prix bas en ce moment"] : st.below >= 0.75 ? ["warn", "Prix élevé en ce moment"] : ["ghost", "Prix dans la normale"];
-    const period = days === 1 ? "24 h" : days + " jours";
-    body.innerHTML = `<div class="chart-stats">
-        <span class="chip ${verdict[0]}">${verdict[1]}</span>
-        <span class="small">Actuel <b class="num">${kinah(st.cur)}</b></span>
-        <span class="small">${pct === 0 ? "égal à" : Math.abs(pct) + " % " + (pct < 0 ? "sous" : "au-dessus de")} la moyenne ${days === 1 ? "sur 24 h" : "sur " + period} (<span class="num">${kinah(st.avg)}</span>)</span>
-        <span class="small muted">min <span class="num">${kinah(st.min)}</span> · max <span class="num">${kinah(st.max)}</span></span>
-      </div>${chartSvg(h.obs, st, days)}<p class="muted small">Prix le plus bas demandé, relevé par A2-Tracker (${st.n} relevés sur ${period}).</p>`;
+    if (!body) return;
+    // Graphique global : coût de la liste de courses (et prix d'achat direct si l'objet est en vente)
+    const series = [];
+    let html = `<div class="chart-stats">`;
+    const B = BASKET.rows.length ? basketSeries(hd, days) : null;
+    if (B && B.tracked) {
+      const st = stats(B.pts.map(p => p[1]), B.pts[B.pts.length - 1][1]);
+      const v = verdictOf(st);
+      series.push({ pts: B.pts, cls: "s-craft", label: "Fabriquer (liste de courses)" });
+      html += `<span class="chip ${v[0]}">Liste de courses : prix ${v[1]}</span><span class="small">Aujourd'hui <b class="num">${kinah(st.cur)}</b>, ${diffText(st, period)}</span><span class="small muted">min <span class="num">${kinah(st.min)}</span> · max <span class="num">${kinah(st.max)}</span></span>`;
+    }
+    const hm = mid ? hd[mid] : null;
+    if (hm && hm.obs && hm.obs.length > 1) {
+      const pts = itemSeries(hm.obs, days);
+      const st = stats(hm.obs.map(o => o[1]), mkt(mid));
+      const v = verdictOf(st);
+      series.push({ pts, cls: "s-buy", label: "Acheter l'objet fini à l'HV" });
+      html += `<span class="break"></span><span class="chip ${v[0]}">Achat direct : prix ${v[1]}</span><span class="small">Aujourd'hui <b class="num">${kinah(st.cur)}</b>, ${diffText(st, period)}</span>`;
+    }
+    html += `</div>`;
+    if (!series.length) { body.innerHTML = `<p class="muted small">Pas d'historique de prix pour les matériaux de cette recette sur ce serveur.</p>`; return; }
+    const untracked = B ? BASKET.rows.length - B.tracked : 0;
+    body.innerHTML = html + chartSvg(series, days) +
+      `<div class="legend">${series.map(s => `<span><i class="${s.cls}"></i>${s.label}</span>`).join("")}</div>
+      <p class="muted small">Coût total de ta liste de courses recalculé à chaque instant avec les prix demandés à l'hôtel des ventes${untracked ? ` (${untracked} objet${untracked > 1 ? "s" : ""} sans historique, comme les achats PNJ, compté${untracked > 1 ? "s" : ""} à prix fixe)` : ""}.</p>`;
   }
-  function chartSvg(obs, st, days) {
-    const W = 640, H = 200, L = 64, R = 12, T = 12, B = 26;
-    const t0 = obs[0][0], t1 = Math.max(obs[obs.length - 1][0], Math.floor(Date.now() / 1000));
-    const pad = (st.max - st.min) * 0.1 || st.max * 0.05 || 1;
-    const y0 = Math.max(0, st.min - pad), y1 = st.max + pad;
+  function chartSvg(series, days) {
+    const W = 640, H = 210, L = 64, R = 12, T = 12, B = 26;
+    const all = series.flatMap(s => s.pts.map(p => p[1]));
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo) * 0.12 || hi * 0.05 || 1;
+    const y0 = Math.max(0, lo - pad), y1 = hi + pad;
+    const t0 = series[0].pts[0][0], t1 = series[0].pts[series[0].pts.length - 1][0];
     const X = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
     const Y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
-    let d = "";
-    obs.forEach((o, i) => { d += (i ? `H${X(o[0]).toFixed(1)}V${Y(o[1]).toFixed(1)}` : `M${X(o[0]).toFixed(1)},${Y(o[1]).toFixed(1)}`); });
-    d += `H${X(t1).toFixed(1)}`;
-    const area = d + `V${(H - B).toFixed(1)}H${X(t0).toFixed(1)}Z`;
-    const grid = [st.min, st.avg, st.max].map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="${v === st.avg ? "c-avg" : "c-grid"}"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" class="c-lab">${kinah(v)}</text>`).join("");
+    const ticks = [y0 + (y1 - y0) * 0.1, (y0 + y1) / 2, y1 - (y1 - y0) * 0.1];
+    let out = ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="c-grid"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" class="c-lab">${kinah(v)}</text>`).join("");
+    for (const s of series) {
+      const d = s.pts.map((p, i) => (i ? "L" : "M") + X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join("");
+      if (s.cls === "s-craft") out += `<path d="${d}L${X(t1).toFixed(1)},${H - B}L${X(t0).toFixed(1)},${H - B}Z" class="c-area"/>`;
+      out += `<path d="${d}" class="c-line ${s.cls}"/>`;
+      const last = s.pts[s.pts.length - 1];
+      out += `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="4" class="c-dot ${s.cls}"/>`;
+    }
     const fmtD = t => new Date(t * 1000).toLocaleString("fr-FR", days === 1 ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
-    const last = obs[obs.length - 1];
-    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du prix">
-      ${grid}<path d="${area}" class="c-area"/><path d="${d}" class="c-line"/>
-      <circle cx="${X(t1).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="4" class="c-dot"/>
-      <text x="${L}" y="${H - 6}" class="c-lab">${fmtD(t0)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="c-lab">maintenant</text>
-      <text x="${W - R}" y="${(Y(st.avg) - 5).toFixed(1)}" text-anchor="end" class="c-lab">moyenne</text></svg>`;
+    out += `<text x="${L}" y="${H - 6}" class="c-lab">${fmtD(t0)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="c-lab">maintenant</text>`;
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du coût">${out}</svg>`;
   }
   $("out").addEventListener("click", e => {
     const b = e.target.closest(".seg button[data-days]"); if (!b) return;
