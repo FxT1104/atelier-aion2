@@ -390,13 +390,29 @@
     if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Le coût compte les combos en moyenne : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)}. Tu peux avoir plus ou moins de chance.</p>`;
 
 
+    // Liste de courses : tout ce qu'il faut acheter, regroupé par matériau.
     const rows = [...acc.map.values()].filter(l => l.t !== "owned").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
-    html += `<div class="shop"><div class="section-title"><h2>À acheter</h2><span class="muted small">du plus cher au moins cher</span></div>
-      <div class="table-wrap"><table class="lines">${rows.map(l => row({ id: l.id, qty: l.qty, t: l.t, total: l.total, unit: l.unit })).join("")}
-      ${acc.credit > 0 ? `<tr class="credit"><td class="q"></td><td>Reventes des objets normaux<span class="en">taxe de 12 % déduite</span></td><td class="v">− ${kinah(acc.credit)}</td></tr>` : ""}
-      </table></div></div>`;
+    const ownedRows = [...acc.map.values()].filter(l => l.t === "owned");
+    const fmtQ = q => Number.isInteger(q) ? nf.format(q) : "≈ " + nf.format(Math.ceil(q));
+    html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><button class="btn small-btn" id="copyList" type="button">Copier la liste</button></div>
+      <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
+      <div class="table-wrap"><table class="shoplist"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th></tr></thead><tbody>
+      ${rows.map(l => `<tr class="${l.t === "missing" ? "missing" : ""}"><td class="r num qcol">${fmtQ(l.qty)}</td>
+        <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
+        <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
+        <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td></tr>`).join("")}
+      ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td></tr>`).join("")}
+      ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td></tr>` : ""}
+      </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td></tr></tfoot></table></div></div>`;
+    window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
     out.innerHTML = html;
   }
+  $("out").addEventListener("click", async e => {
+    const b = e.target.closest("#copyList"); if (!b) return;
+    try { await navigator.clipboard.writeText(window.__shopText || ""); b.textContent = "Liste copiée"; }
+    catch (err) { b.textContent = "Copie impossible"; }
+    setTimeout(() => { b.textContent = "Copier la liste"; }, 2000);
+  });
   function missingList(S, g) {
     const miss = new Set();
     for (const id of g.ids) for (const r of [...(BY_OUT.get(id) || []), ...(BY_COMBO.get(id) || [])]) {

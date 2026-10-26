@@ -153,3 +153,13 @@ footer { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 .combo-list .lv { font-family: var(--f-mono); font-size: .78rem; color: var(--brass); text-align: right; white-space: nowrap; }
 .combo-list .sub { text-align: left; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 600px) { .combo-list li { grid-template-columns: minmax(0, 1fr) 4.2em; } .combo-list .sub { display: none; } }
+.small-btn { padding: 4px 12px; font-size: .85rem; }
+.shoplist { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.shoplist th { text-align: left; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.shoplist td { padding: 7px 6px; border-bottom: 1px dashed var(--line); vertical-align: top; }
+.shoplist .r { text-align: right; white-space: nowrap; }
+.shoplist .qcol { font-weight: 500; color: var(--brass); width: 6em; }
+.shoplist .en { display: block; font-size: .78rem; color: var(--muted); }
+.shoplist tr.missing td { color: var(--bad); }
+.shoplist tr.credit td, .shoplist tr.owned td { color: var(--good); }
+.shoplist tfoot td { border-bottom: 0; border-top: 1px solid var(--line); font-weight: 600; padding-top: 10px; }
