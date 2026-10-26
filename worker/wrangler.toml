@@ -2,3 +2,4 @@ name = "atelier-aion2-prix"
 main = "worker.js"
 compatibility_date = "2026-06-01"
 workers_dev = true
+account_id = "a7cd045e40bb956f0c6e485889a21710"
