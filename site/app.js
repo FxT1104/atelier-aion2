@@ -64,8 +64,8 @@
   const selfCombo = r => r[11] && r[11][2] > 0 && GROUP_OF.get(r[11][0]) === GROUP_OF.get(r[1]);
   const yieldOf = r => selfCombo(r) && $("optCombo").checked ? (1 - r[11][2] / 10000) * r[2] + (r[11][2] / 10000) * r[11][1] : r[2];
   // Coût minimal de chaque objet : achat (HV ou PNJ), craft, ou combo depuis une recette parente.
-  function solve(ownedIds) {
-    const useCombo = $("optCombo").checked, useResale = $("optResale").checked;
+  function solve(ownedIds, o = {}) {
+    const useCombo = $("optCombo").checked, useResale = o.resale != null ? o.resale : $("optResale").checked;
     const cost = new Map(), how = new Map();
     const c = id => { const v = cost.get(id); return v == null ? Infinity : v; };
     for (const id of Object.keys(CAT.items)) {
@@ -641,39 +641,54 @@
     $("rcats").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.cat === rentCat)));
     renderProfit();
   });
+  // Rentabilité d'une recette : ce que rapporte un craft (vente de l'objet obtenu, combo compris en moyenne)
+  // moins le coût des matériaux. Les matériaux sont comptés sans supposer de revente de sous-produits.
   function renderProfit() {
     if (!CAT) return;
     if (!$("rcats").innerHTML) renderRentCats();
-    const S = solve(new Set());
+    const S = solve(new Set(), { resale: false });
     const q = norm($("rsearch").value).trim().split(/\s+/).filter(Boolean);
     const minL = Number($("rmin").value) || 1, sort = $("rsort").value;
-    const rows = [];
-    for (const g of GROUPS.values()) {
-      if (!g.craftable) continue;
+    const best = new Map();
+    for (const r of RECIPES) {
+      if (r[3]) continue; // conversions : pas de vente
+      const out = r[1], price = mkt(out);
+      if (price == null) continue;
+      const g = GROUPS.get(GROUP_OF.get(out)); if (!g) continue;
       if (rentCat !== "all" && catOf(g) !== rentCat) continue;
-      const id = marketIdOf(g); if (!id) continue;
-      const p = PR.prices[id]; const price = mkt(id); if (price == null) continue;
-      const listings = p ? p[1] : null;
+      const listings = PR.prices[out] ? PR.prices[out][1] : null;
       if ((listings || 0) < minL) continue;
       if (q.length) { const hay = norm(g.name) + " " + norm(g.en) + " " + g.lvl; if (!q.every(w => hay.includes(w))) continue; }
-      const bc = bestCraft(S, [id]); if (!bc) continue;
-      const net = price * (1 - TAX), profit = net - bc.unit;
-      const r = bc.how.r;
-      rows.push({ g, id, price, net, cost: bc.unit, profit, margin: bc.unit > 0 ? profit / bc.unit : 0, listings, combo: bc.how.t === "combo", prof: r[4], mastery: r[5] });
+      const cost = S.inputsCost(r); if (!isFinite(cost) || cost <= 0) continue;
+      let revenue = price * (1 - TAX) * r[2], combo = null;
+      if (r[11] && r[11][2] > 0 && $("optCombo").checked) {
+        const p = r[11][2] / 10000, cp = mkt(r[11][0]);
+        const cval = cp != null ? cp * (1 - TAX) * r[11][1] : price * (1 - TAX) * r[2];
+        revenue = (1 - p) * revenue + p * cval;
+        combo = { id: r[11][0], p, price: cp };
+      }
+      const profit = revenue - cost;
+      const row = { g, id: out, price, revenue, cost, profit, margin: profit / cost, listings, combo, qty: r[2], prof: r[4], mastery: r[5] };
+      const prev = best.get(g.key);
+      if (!prev || row.profit > prev.profit) best.set(g.key, row);
     }
+    const rows = [...best.values()];
     const key = { profit: r => r.profit, margin: r => r.margin, listings: r => r.listings || 0 }[sort];
     rows.sort((a, b) => key(b) - key(a));
     const good = rows.filter(r => r.profit > 0);
+    const top = good.slice().sort((a, b) => b.profit - a.profit)[0];
     $("rsummary").innerHTML = rows.length
-      ? `<p class="small"><b>${good.length}</b> objet${good.length > 1 ? "s" : ""} rentable${good.length > 1 ? "s" : ""} sur ${rows.length} en vente sur ${esc(server.name)}${good.length ? `. Le plus rentable : <b>${esc(good.slice().sort((a, b) => b.profit - a.profit)[0].g.name)}</b> (+${kinah(good.slice().sort((a, b) => b.profit - a.profit)[0].profit)} par objet)` : ""}.</p>`
+      ? `<p class="small"><b>${good.length}</b> craft${good.length > 1 ? "s" : ""} rentable${good.length > 1 ? "s" : ""} sur ${rows.length} objets en vente sur ${esc(server.name)}${top ? `. Le plus rentable : <b>${esc(top.g.name)}</b> (+${kinah(top.profit)} par craft)` : ""}.</p>`
       : `<div class="empty">Aucun objet ne correspond à ces filtres.</div>`;
     const shown = rows.slice(0, 150);
-    let html = `<thead><tr><th>Objet</th><th class="r">Coût de fabrication</th><th class="r">Prix de vente HV</th><th class="r">Bénéfice</th><th class="r">Marge</th><th class="r">Annonces</th><th></th></tr></thead><tbody>`;
+    let html = `<thead><tr><th>Objet</th><th class="r">Coût des matériaux</th><th class="r">Vente HV</th><th class="r">Bénéfice par craft</th><th class="r">Marge</th><th class="r">Annonces</th><th></th></tr></thead><tbody>`;
     for (const r of shown) {
       const pos = r.profit > 0;
-      html += `<tr><td>${gdot(r.id)}${esc(r.g.name)}${lvlTag(r.g.lvl)}<span class="en">${esc(PROF[r.prof] || r.prof)}${r.mastery ? " · maîtrise " + r.mastery : ""}${r.combo ? " · via combo (moyenne)" : ""}</span></td>
+      const extra = [PROF[r.prof] || r.prof, r.mastery ? "maîtrise " + r.mastery : "", r.qty > 1 ? r.qty + " par craft" : "",
+        r.combo ? `combo ${Math.round(r.combo.p * 100)} % → ${nameOf(r.combo.id)}${r.combo.price != null ? " (" + kinah(r.combo.price) + ")" : ""}` : ""].filter(Boolean).join(" · ");
+      html += `<tr><td>${gdot(r.id)}${esc(r.g.name)}${lvlTag(r.g.lvl)}<span class="en">${esc(extra)}</span></td>
         <td class="r num">${kinah(r.cost)}</td>
-        <td class="r num">${kinah(r.price)}<span class="en">net ${kinah(r.net)}</span></td>
+        <td class="r num">${kinah(r.price)}<span class="en">${r.combo ? "moyenne nette " + kinah(r.revenue) : "net " + kinah(r.revenue)}</span></td>
         <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"} ${kinah(Math.abs(r.profit))}</td>
         <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"}${Math.abs(Math.round(r.margin * 100))} %</td>
         <td class="r num muted">${r.listings != null ? r.listings : "—"}</td>
