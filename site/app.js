@@ -230,7 +230,8 @@
       }
       frontier = next;
     }
-    return [...seen.entries()].sort((a, b) => a[1] - b[1]).map(([k]) => GROUPS.get(k));
+    // Du plus haut niveau au plus bas (à niveau égal, l'étape la plus proche de l'objectif d'abord).
+    return [...seen.entries()].map(([k, d]) => ({ g: GROUPS.get(k), d })).sort((a, b) => b.g.lvl - a.g.lvl || a.d - b.d).map(x => x.g);
   }
 
   // ================= Interface : objectif =================
