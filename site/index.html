@@ -27,6 +27,7 @@
 
   <nav class="tabs" role="tablist">
     <button role="tab" id="tab-calc" aria-selected="true" aria-controls="view-calc" type="button">Calcul</button>
+    <button role="tab" id="tab-rent" aria-selected="false" aria-controls="view-rent" type="button">Rentabilité</button>
     <button role="tab" id="tab-prix" aria-selected="false" aria-controls="view-prix" type="button">Prix du marché</button>
   </nav>
 
@@ -61,6 +62,34 @@
     <div id="out" aria-live="polite">
       <div class="empty">Choisis un objectif pour voir ce qu'il te coûte.</div>
     </div>
+  </section>
+
+  <section id="view-rent" class="view" role="tabpanel" aria-labelledby="tab-rent" hidden>
+    <div class="picker">
+      <div class="rent-filters">
+        <label class="field" for="rsearch"><span class="label">Rechercher</span>
+          <input id="rsearch" type="search" autocomplete="off" spellcheck="false" placeholder="Nom ou niveau (ex. 94)">
+        </label>
+        <label class="field" for="rsort"><span class="label">Trier par</span>
+          <select id="rsort">
+            <option value="profit">Bénéfice par objet</option>
+            <option value="margin">Marge en %</option>
+            <option value="listings">Nombre d'annonces</option>
+          </select>
+        </label>
+        <label class="field" for="rmin"><span class="label">Annonces minimum</span>
+          <select id="rmin">
+            <option value="1">Toutes</option>
+            <option value="3" selected>3 ou plus</option>
+            <option value="10">10 ou plus</option>
+          </select>
+        </label>
+      </div>
+      <div class="cats" id="rcats" role="group" aria-label="Catégorie"></div>
+      <p class="muted small">Ce que tu gagnes en fabriquant un objet avec des matériaux achetés à l'hôtel des ventes puis en le revendant au prix le plus bas actuel, taxe de 12 % déduite. Peu d'annonces = marché étroit : tu risques de vendre moins vite.</p>
+    </div>
+    <div id="rsummary"></div>
+    <div class="table-wrap"><table class="ptable rtable" id="rtable"></table></div>
   </section>
 
   <section id="view-prix" class="view" role="tabpanel" aria-labelledby="tab-prix" hidden>

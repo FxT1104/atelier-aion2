@@ -622,12 +622,76 @@
   });
   $("resetEdits").addEventListener("click", () => { overrides = {}; save("atelier-overrides", overrides); renderPrices(); });
 
+  const TABS = [["tab-calc", "view-calc"], ["tab-rent", "view-rent"], ["tab-prix", "view-prix"]];
   function showTab(tab) {
-    for (const [t, v] of [["tab-calc", "view-calc"], ["tab-prix", "view-prix"]]) { $(t).setAttribute("aria-selected", String(t === tab)); $(v).hidden = t !== tab; }
-    if (tab === "tab-prix") renderPrices(); else compute();
+    for (const [t, v] of TABS) { $(t).setAttribute("aria-selected", String(t === tab)); $(v).hidden = t !== tab; }
+    if (tab === "tab-prix") renderPrices(); else if (tab === "tab-rent") renderProfit(); else compute();
   }
-  $("tab-calc").addEventListener("click", () => showTab("tab-calc"));
-  $("tab-prix").addEventListener("click", () => showTab("tab-prix"));
+  function refreshView() { if (!$("view-prix").hidden) renderPrices(); else if (!$("view-rent").hidden) renderProfit(); else compute(); }
+  for (const [t] of TABS) $(t).addEventListener("click", () => showTab(t));
+
+  // ================= Onglet rentabilité =================
+  let rentCat = "all";
+  function renderRentCats() {
+    $("rcats").innerHTML = CATS.map(([k, label]) => `<button type="button" data-cat="${k}" aria-pressed="${k === rentCat}">${label}</button>`).join("");
+  }
+  $("rcats").addEventListener("click", e => {
+    const b = e.target.closest("button[data-cat]"); if (!b) return;
+    rentCat = b.dataset.cat;
+    $("rcats").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.cat === rentCat)));
+    renderProfit();
+  });
+  function renderProfit() {
+    if (!CAT) return;
+    if (!$("rcats").innerHTML) renderRentCats();
+    const S = solve(new Set());
+    const q = norm($("rsearch").value).trim().split(/\s+/).filter(Boolean);
+    const minL = Number($("rmin").value) || 1, sort = $("rsort").value;
+    const rows = [];
+    for (const g of GROUPS.values()) {
+      if (!g.craftable) continue;
+      if (rentCat !== "all" && catOf(g) !== rentCat) continue;
+      const id = marketIdOf(g); if (!id) continue;
+      const p = PR.prices[id]; const price = mkt(id); if (price == null) continue;
+      const listings = p ? p[1] : null;
+      if ((listings || 0) < minL) continue;
+      if (q.length) { const hay = norm(g.name) + " " + norm(g.en) + " " + g.lvl; if (!q.every(w => hay.includes(w))) continue; }
+      const bc = bestCraft(S, [id]); if (!bc) continue;
+      const net = price * (1 - TAX), profit = net - bc.unit;
+      const r = bc.how.r;
+      rows.push({ g, id, price, net, cost: bc.unit, profit, margin: bc.unit > 0 ? profit / bc.unit : 0, listings, combo: bc.how.t === "combo", prof: r[4], mastery: r[5] });
+    }
+    const key = { profit: r => r.profit, margin: r => r.margin, listings: r => r.listings || 0 }[sort];
+    rows.sort((a, b) => key(b) - key(a));
+    const good = rows.filter(r => r.profit > 0);
+    $("rsummary").innerHTML = rows.length
+      ? `<p class="small"><b>${good.length}</b> objet${good.length > 1 ? "s" : ""} rentable${good.length > 1 ? "s" : ""} sur ${rows.length} en vente sur ${esc(server.name)}${good.length ? `. Le plus rentable : <b>${esc(good.slice().sort((a, b) => b.profit - a.profit)[0].g.name)}</b> (+${kinah(good.slice().sort((a, b) => b.profit - a.profit)[0].profit)} par objet)` : ""}.</p>`
+      : `<div class="empty">Aucun objet ne correspond à ces filtres.</div>`;
+    const shown = rows.slice(0, 150);
+    let html = `<thead><tr><th>Objet</th><th class="r">Coût de fabrication</th><th class="r">Prix de vente HV</th><th class="r">Bénéfice</th><th class="r">Marge</th><th class="r">Annonces</th><th></th></tr></thead><tbody>`;
+    for (const r of shown) {
+      const pos = r.profit > 0;
+      html += `<tr><td>${gdot(r.id)}${esc(r.g.name)}${lvlTag(r.g.lvl)}<span class="en">${esc(PROF[r.prof] || r.prof)}${r.mastery ? " · maîtrise " + r.mastery : ""}${r.combo ? " · via combo (moyenne)" : ""}</span></td>
+        <td class="r num">${kinah(r.cost)}</td>
+        <td class="r num">${kinah(r.price)}<span class="en">net ${kinah(r.net)}</span></td>
+        <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"} ${kinah(Math.abs(r.profit))}</td>
+        <td class="r num ${pos ? "pos" : "neg"}">${pos ? "+" : "−"}${Math.abs(Math.round(r.margin * 100))} %</td>
+        <td class="r num muted">${r.listings != null ? r.listings : "—"}</td>
+        <td class="r"><button class="linkish" type="button" data-goal="${esc(r.g.key)}">Détail</button></td></tr>`;
+    }
+    if (rows.length > shown.length) html += `<tr><td colspan="7" class="muted small">${rows.length - shown.length} autres objets : affine la recherche.</td></tr>`;
+    $("rtable").innerHTML = rows.length ? html + "</tbody>" : "";
+  }
+  const marketIdOf = g => g.ids.find(id => PR.prices[id] || overrides[id] != null) || null;
+  let rTimer = 0;
+  $("rsearch").addEventListener("input", () => { clearTimeout(rTimer); rTimer = setTimeout(renderProfit, 150); });
+  $("rsort").addEventListener("change", renderProfit);
+  $("rmin").addEventListener("change", renderProfit);
+  $("rtable").addEventListener("click", e => {
+    const b = e.target.closest("button[data-goal]"); if (!b) return;
+    const g = GROUPS.get(b.dataset.goal); if (!g) return;
+    showTab("tab-calc"); pickGoal(g);
+  });
 
   // ================= Serveur et adresse =================
   function writeUrl() {
@@ -658,7 +722,7 @@
     buildIndex(); setFreshness();
     if (goalKey && !GROUPS.get(goalKey)) goalKey = null;
     fillHave();
-    if (!$("view-prix").hidden) renderPrices(); else compute();
+    refreshView();
   }
   $("server").addEventListener("change", () => loadServer($("server").value));
 

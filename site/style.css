@@ -190,3 +190,9 @@ footer { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 .spark { display: block; overflow: visible; }
 .spark path { fill: none; stroke: var(--plum); stroke-width: 1.5; }
 .spark circle { fill: var(--brass); }
+.rent-filters { display: grid; grid-template-columns: minmax(0, 1fr) 13em 10em; gap: 12px; align-items: end; }
+@media (max-width: 600px) { .rent-filters { grid-template-columns: 1fr 1fr; } .rent-filters .field:first-child { grid-column: 1 / -1; } }
+.rtable td.pos { color: var(--good); font-weight: 600; }
+.rtable td.neg { color: var(--bad); }
+.rtable .en { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; }
+#rsummary p { margin: 0; }
