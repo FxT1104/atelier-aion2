@@ -4,7 +4,7 @@ Calculateur de craft pour Aion 2 : choisis ton serveur, ton objectif et ce que t
 
 ## Comment ça marche
 
-- `scripts/build-data.mjs` récupère les recettes, les objets et les prix sur [A2-Tracker](https://a2-tracker.com/) (avec leur accord) et les écrit en JSON compact dans `site/data/`.
+- `scripts/build-data.mjs` récupère les recettes, les objets et les prix. Je les écrit en JSON compact dans `site/data/`.
 - La GitHub Action `.github/workflows/deploy.yml` lance ce script toutes les 10 minutes et publie le dossier `site/` sur GitHub Pages. Les données ne sont jamais committées, le dépôt reste léger.
 - Le site (`site/index.html`, `site/app.js`, `site/style.css`) est 100 % statique : tout le calcul se fait dans le navigateur.
 
