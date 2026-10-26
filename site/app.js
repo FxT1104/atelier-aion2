@@ -307,11 +307,27 @@
     const val = n.t === "missing" ? "prix manquant" : n.t === "owned" ? "possédé" : kinah(n.total);
     return `<tr class="${cls}"><td class="q">×${qtyFmt(n.qty)}</td><td>${gdot(n.id)}${esc(nameOf(n.id))}${unit}${srcTag(n)}<span class="en">${esc(enOf(n.id))}${n.transfer ? " · équipement transféré, consommé" : ""}</span></td><td class="v">${val}</td></tr>`;
   }
-  function flat(n, out) { // ordre de fabrication : les sous-crafts d'abord
-    if (n.t === "group") { n.kids.forEach(k => flat(k, out)); return; }
-    if (n.t !== "craft" && n.t !== "combo") return;
-    n.kids.forEach(k => flat(k, out));
-    out.push(n);
+  const isMade = k => k.t === "craft" || k.t === "combo";
+  // Ordre de fabrication (les sous-crafts d'abord), en regroupant les crafts identiques.
+  function flat(n, out, seen = new Map()) {
+    if (n.t === "group") { n.kids.forEach(k => flat(k, out, seen)); return; }
+    if (!isMade(n)) return;
+    n.kids.forEach(k => flat(k, out, seen));
+    // Coût propre de l'étape : ce qui est acheté ici (les objets fabriqués sont comptés dans leur étape).
+    const own = n.total - n.kids.filter(isMade).reduce((a, k) => a + k.total, 0);
+    const key = n.id + "|" + n.t + "|" + n.r[0];
+    const prev = seen.get(key);
+    if (!prev) {
+      const s = { ...n, own, kids: n.kids.map(k => ({ ...k })), credit: n.credit ? { ...n.credit } : null };
+      seen.set(key, s); out.push(s); return;
+    }
+    prev.qty += n.qty; prev.runs += n.runs; prev.total += n.total; prev.own += own;
+    if (n.fee) prev.fee = (prev.fee || 0) + n.fee;
+    if (n.credit) { if (prev.credit) { prev.credit.qty += n.credit.qty; prev.credit.total += n.credit.total; } else prev.credit = { ...n.credit }; }
+    for (const k of n.kids) {
+      const m = prev.kids.find(x => x.id === k.id && x.t === k.t);
+      if (m) { m.qty += k.qty; m.total += k.total; } else prev.kids.push({ ...k });
+    }
   }
   function leaves(n, acc) {
     if (n.t === "group") { n.kids.forEach(k => leaves(k, acc)); return; }
@@ -359,7 +375,7 @@
     if (haveKey && !usedOwned) html += `<p class="notice info">Le calcul n'utilise pas ton « ${esc(GROUPS.get(haveKey).name)} » : il est moins cher de partir d'un autre chemin.</p>`;
     if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Les étapes « combo » sont des moyennes : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)} en moyenne. Tu peux avoir plus ou moins de chance.</p>`;
 
-    html += `<div class="section-title"><h2>Étapes</h2><span class="muted small">${steps.length} craft${steps.length > 1 ? "s" : ""}, dans l'ordre</span></div><div class="steps">`;
+    html += `<div class="section-title"><h2>Étapes</h2><span class="muted small">${steps.length} étape${steps.length > 1 ? "s" : ""}, dans l'ordre · montant = achats de l'étape</span></div><div class="steps">`;
     html += steps.map((s, i) => {
       const r = s.r;
       const kind = s.t === "combo" ? `Combo (${Math.round(s.p * 100)} %) sur « ${esc(nameOf(r[1]))} »` : r[10].length ? "Transfert" : r[3] ? "Conversion" : "Craft";
@@ -371,7 +387,7 @@
       if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
       return `<article class="step${isEquip ? "" : " sub"}">
         <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3><span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
-        <span class="step-cost">${isFinite(s.total) ? kinah(s.total) : "—"}</span></div>
+        <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${isFinite(s.own) ? kinah(s.own) : "—"}</span></div>
         <div class="step-body"><div class="table-wrap"><table class="lines">${s.kids.map(k => k.t === "group" ? k.kids.map(row).join("") : row(k)).join("")}
         ${s.credit ? `<tr class="credit"><td class="q">×${qtyFmt(s.credit.qty)}</td><td>${esc(nameOf(s.credit.id))}<span class="en">revente des objets normaux</span></td><td class="v">− ${kinah(-s.credit.total)}</td></tr>` : ""}
         ${s.fee ? `<tr><td class="q"></td><td>Frais de fabrication</td><td class="v">${kinah(s.fee)}</td></tr>` : ""}
