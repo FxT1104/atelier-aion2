@@ -15,7 +15,6 @@ Calculateur de craft pour Aion 2 : choisis ton serveur, ton objectif et ce que t
 
 ## Limites
 
-- Prix A2-Tracker publics : 5 minutes de retard, plus le délai de la mise à jour (environ 10 minutes, parfois plus : GitHub retarde souvent les tâches planifiées).
 - Prix demandés, pas des ventes conclues. Le calcul suppose que chaque craft réussit.
 - GitHub met en pause les tâches planifiées d'un dépôt public sans activité pendant 60 jours : il suffit alors de relancer la Action à la main (onglet Actions → « Mettre à jour et publier » → Run workflow).
 
