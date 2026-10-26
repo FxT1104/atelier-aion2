@@ -148,3 +148,8 @@ footer { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 @media (prefers-reduced-motion: no-preference) { .step, .btn { transition: border-color .15s; } }
 .tag.lvl { background: var(--brass-soft); color: var(--brass); font-family: var(--f-mono); }
 .goal-name .tag, .step-title .tag { vertical-align: middle; }
+.combo-list li { display: grid; grid-template-columns: minmax(0, 1fr) 4.6em 10.5em; align-items: baseline; }
+.combo-list li.none { display: block; }
+.combo-list .lv { font-family: var(--f-mono); font-size: .78rem; color: var(--brass); text-align: right; white-space: nowrap; }
+.combo-list .sub { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 600px) { .combo-list li { grid-template-columns: minmax(0, 1fr) 4.2em; } .combo-list .sub { display: none; } }

@@ -264,7 +264,7 @@
     listItems = searchGroups(goalInput.value, true, 60);
     activeIdx = listItems.length ? 0 : -1;
     goalList.innerHTML = listItems.length
-      ? listItems.map((g, i) => `<li role="option" id="opt-${i}" data-i="${i}" aria-selected="${i === activeIdx}"><span>${gdot(g.ids[0])}${esc(g.name)}</span><span class="sub">${g.lvl ? "niv. " + g.lvl + " · " : ""}${esc(SUB[g.kind] || SUB[g.sub] || g.sub || g.main || "")}</span></li>`).join("")
+      ? listItems.map((g, i) => `<li role="option" id="opt-${i}" data-i="${i}" aria-selected="${i === activeIdx}"><span>${gdot(g.ids[0])}${esc(g.name)}</span><span class="lv">${g.lvl ? "niv. " + g.lvl : ""}</span><span class="sub">${esc(SUB[g.kind] || SUB[g.sub] || g.sub || g.main || "")}</span></li>`).join("")
       : `<li class="none">Aucun objet fabricable ne correspond.</li>`;
     goalList.hidden = false; goalInput.setAttribute("aria-expanded", "true");
   }
@@ -274,7 +274,10 @@
     haveKey = ""; fillHave(); compute();
   }
   goalInput.addEventListener("input", openList);
-  goalInput.addEventListener("focus", () => { goalInput.select(); openList(); });
+  // En revenant sur la case, on repart d'une recherche vide pour voir toute la liste.
+  const clearIfChosen = () => { const g = GROUPS.get(goalKey); if (g && goalInput.value === g.name) goalInput.value = ""; };
+  goalInput.addEventListener("focus", () => { clearIfChosen(); openList(); });
+  goalInput.addEventListener("click", () => { if (goalList.hidden) { clearIfChosen(); openList(); } });
   goalInput.addEventListener("keydown", e => {
     if (goalList.hidden && (e.key === "ArrowDown" || e.key === "Enter")) { openList(); return; }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -286,7 +289,7 @@
     else if (e.key === "Escape") { closeList(); }
   });
   goalList.addEventListener("mousedown", e => { const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); pickGoal(listItems[Number(li.dataset.i)]); } });
-  document.addEventListener("click", e => { if (!$("goal-combo").contains(e.target)) { closeList(); if (goalKey && GROUPS.get(goalKey)) goalInput.value = GROUPS.get(goalKey).name; } });
+  document.addEventListener("click", e => { if (!$("goal-combo").contains(e.target) && !$("cats").contains(e.target)) { closeList(); if (goalKey && GROUPS.get(goalKey)) goalInput.value = GROUPS.get(goalKey).name; } });
 
   function fillHave() {
     const sel = $("have");
