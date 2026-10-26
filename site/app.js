@@ -57,6 +57,9 @@
   }
 
   // ================= Moteur =================
+  // Un combo qui donne le même objet (souvent en plus grande quantité) augmente juste le rendement moyen.
+  const selfCombo = r => r[11] && r[11][2] > 0 && GROUP_OF.get(r[11][0]) === GROUP_OF.get(r[1]);
+  const yieldOf = r => selfCombo(r) && $("optCombo").checked ? (1 - r[11][2] / 10000) * r[2] + (r[11][2] / 10000) * r[11][1] : r[2];
   // Coût minimal de chaque objet : achat (HV ou PNJ), craft, ou combo depuis une recette parente.
   function solve(ownedIds) {
     const useCombo = $("optCombo").checked, useResale = $("optResale").checked;
@@ -88,9 +91,9 @@
       for (const r of RECIPES) {
         const total = inputsCost(r);
         if (!isFinite(total)) continue;
-        const unit = total / r[2];
+        const unit = total / yieldOf(r);
         if (unit < c(r[1]) - 0.01 && !ownedIds.has(r[1])) { cost.set(r[1], unit); how.set(r[1], { t: "craft", r }); changed = true; }
-        if (useCombo && r[11] && r[11][2] > 0) {
+        if (useCombo && r[11] && r[11][2] > 0 && !selfCombo(r)) {
           const p = r[11][2] / 10000, tries = 1 / p;
           const sell = useResale ? (mkt(r[1]) || 0) * (1 - TAX) * r[2] : 0;
           const exp = Math.max(0, tries * total - (tries - 1) * sell) / r[11][1];
@@ -109,10 +112,11 @@
     for (const id of ids) {
       for (const r of BY_OUT.get(id) || []) {
         const total = S.inputsCost(r); if (!isFinite(total)) continue;
-        const unit = total / r[2];
+        const unit = total / yieldOf(r);
         if (!best || unit < best.unit) best = { id, unit, how: { t: "craft", r } };
       }
       if (useCombo) for (const r of BY_COMBO.get(id) || []) {
+        if (selfCombo(r)) continue;
         const total = S.inputsCost(r); if (!isFinite(total)) continue;
         const p = r[11][2] / 10000, tries = 1 / p;
         const sell = useResale ? (mkt(r[1]) || 0) * (1 - TAX) * r[2] : 0;
@@ -144,7 +148,7 @@
     stack.add(id);
     const r = h.r;
     let runs, made;
-    if (h.t === "craft") { runs = Math.ceil(qty / r[2] - 1e-9); made = runs * r[2]; node.runs = runs; }
+    if (h.t === "craft") { runs = Math.ceil(qty / yieldOf(r) - 1e-9); made = runs * r[2]; node.runs = runs; }
     else {
       const p = r[11][2] / 10000, tries = 1 / p;
       runs = qty / r[11][1] * tries; node.runs = runs; node.p = p;
@@ -384,7 +388,8 @@
       const notes = [];
       if (r[10].length) notes.push("L'équipement précédent est consommé ; son enchantement est conservé. L'objet obtenu est lié au personnage.");
       if (s.t === "combo" && s.credit) notes.push(`Les ${qtyFmt(s.credit.qty)} « ${nameOf(s.credit.id)} » obtenus en ratant le combo sont revendus (taxe de 12 % déduite).`);
-      if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
+      if (r[11] && s.t === "craft" && selfCombo(r)) notes.push(`Combo (${Math.round(r[11][2] / 100)} %) : donne ${r[11][1]} au lieu de ${r[2]}. Compté en moyenne : ${nf2.format(yieldOf(r))} par craft.`);
+      else if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
       return `<article class="step${isEquip ? "" : " sub"}">
         <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3><span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
         <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${!isFinite(s.own) ? "—" : s.own < 0 ? `<span style="color:var(--good)">+ ${kinah(-s.own)} net</span>` : kinah(s.own)}</span></div>
