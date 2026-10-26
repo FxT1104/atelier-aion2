@@ -10,7 +10,7 @@ const CACHE_SECONDS = 600;
 const MAX_ITEMS = 30;
 const TAX = 0.12;
 const MAX_ALERTS_PER_WEBHOOK = 10;
-const MAX_ALERTS_TOTAL = 500;
+const MAX_ALERTS_TOTAL = 250; // reste dans les limites gratuites de Cloudflare avec une vérification toutes les 5 min
 const WEBHOOK_RE = /^https:\/\/(?:ptb\.|canary\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d{5,25}\/[\w-]{20,120}$/;
 
 export default {
@@ -41,7 +41,7 @@ export default {
     }
   },
 
-  // Vérification horaire des alertes
+  // Vérification des alertes toutes les 5 minutes
   async scheduled(event, env, ctx) {
     ctx.waitUntil(checkAlerts(env));
   },
@@ -164,7 +164,7 @@ async function createAlert(request, env, cors) {
       ? `Je te préviens ici quand ta liste de courses passe sous **${kinah(alert.threshold)}** Kinah`
       : `Je te préviens ici quand ce craft rapporte plus de **${kinah(alert.threshold)}** Kinah`) +
       (serverLabel ? ` sur ${serverLabel}` : "") + "." + (current != null ? `\nValeur actuelle : **${kinah(current)}** Kinah.` : "") +
-      "\nVérification toutes les heures.",
+      "\nVérification toutes les 5 minutes.",
   });
   if (!test.ok) return err("Discord a refusé le message de test : vérifie l'adresse du webhook.");
   await env.ALERTS.put("a:" + alert.id, JSON.stringify(alert), { metadata: { h } });
@@ -195,7 +195,7 @@ async function deleteAlert(id, url, env, cors) {
   return json({ ok: true }, 200, cors);
 }
 
-// ================= Vérification horaire =================
+// ================= Vérification périodique =================
 async function checkAlerts(env) {
   let cursor, keys = [];
   do {

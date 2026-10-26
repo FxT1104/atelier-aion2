@@ -655,7 +655,7 @@
       const list = load("atelier-alerts", []);
       list.push({ id: d.id, key: d.key, label: c.label, kind: c.kind, threshold, serverLabel: serverLabel(), url: c.url, created: new Date().toISOString() });
       save("atelier-alerts", list); updateAlertCount();
-      msg.textContent = "Alerte créée. Un message de test vient d'arriver sur ton salon Discord. Les prix sont vérifiés toutes les heures.";
+      msg.textContent = "Alerte créée. Un message de test vient d'arriver sur ton salon Discord. Les prix sont vérifiés toutes les 5 minutes.";
       msg.className = "small ok"; btn.hidden = true; $("alertCancel").textContent = "Fermer";
     } catch (err) {
       msg.textContent = err.message; msg.className = "small err"; btn.disabled = false;

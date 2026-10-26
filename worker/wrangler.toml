@@ -4,6 +4,6 @@ compatibility_date = "2026-06-01"
 workers_dev = true
 account_id = "a7cd045e40bb956f0c6e485889a21710"
 
-# Vérification des alertes Discord toutes les heures
+# Vérification des alertes Discord toutes les 5 minutes (le délai des prix A2-Tracker)
 [triggers]
-crons = ["7 * * * *"]
+crons = ["*/5 * * * *"]
