@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - if: env.HAS_TOKEN != 'true'
-        run: echo "Secrets Cloudflare absents : relais non publié."
+        run: echo "Secrets Cloudflare absents, relais non publié."
       - if: env.HAS_TOKEN == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
