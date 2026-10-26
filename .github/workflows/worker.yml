@@ -17,8 +17,13 @@ jobs:
       - if: env.HAS_TOKEN != 'true'
         run: echo "Secrets Cloudflare absents, relais non publié."
       - if: env.HAS_TOKEN == 'true'
+        id: wr
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
+      - if: env.HAS_TOKEN == 'true'
+        run: |
+          echo "::notice title=Adresse du relais::${{ steps.wr.outputs.deployment-url }}"
+          echo "Adresse du relais : ${{ steps.wr.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"
