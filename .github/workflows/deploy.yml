@@ -25,6 +25,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Date du jour
+        id: day
+        run: echo "d=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: levels-${{ steps.day.outputs.d }}
+          restore-keys: levels-
       - name: Récupérer recettes et prix (A2-Tracker)
         run: node scripts/build-data.mjs
         env:

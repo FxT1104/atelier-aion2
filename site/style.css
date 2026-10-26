@@ -146,3 +146,5 @@ button { cursor: pointer; }
 .empty { padding: 28px 16px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; }
 footer { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 @media (prefers-reduced-motion: no-preference) { .step, .btn { transition: border-color .15s; } }
+.tag.lvl { background: var(--brass-soft); color: var(--brass); font-family: var(--f-mono); }
+.goal-name .tag, .step-title .tag { vertical-align: middle; }

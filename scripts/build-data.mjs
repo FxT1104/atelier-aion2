@@ -42,9 +42,34 @@ const servers = srv.servers
 // ---------- Catalogue (objets + recettes), en français et en anglais ----------
 const fr = await getJson("/api.crafting.ashx?locale=fr-FR");
 const en = await getJson("/api.crafting.ashx?locale=en-US");
+// Niveaux des objets (base d'objets A2-Tracker), gardés en cache une journée entre deux lancements.
+const CACHE = new URL("../.cache/", import.meta.url);
+await mkdir(CACHE, { recursive: true });
+let levels = null;
+try {
+  const c = JSON.parse(await readFile(new URL("levels.json", CACHE), "utf8"));
+  if (Date.now() - Date.parse(c.at) < 24 * 3600e3) levels = c.levels;
+} catch (e) {}
+if (!levels) {
+  try {
+    levels = {};
+    for (let page = 1, pages = 1; page <= pages && page <= 60; page++) {
+      const d = await getJson(`/api.database.ashx?page=${page}&limit=100&server=2302&locale=fr-FR&sort=name&dir=asc&priced=all&ah=1&unique=1`);
+      pages = d.pages || 1;
+      for (const it of d.items || []) levels[it.itemId] = [it.itemLevel || 0, it.levelReq || it.equipLevel || 0];
+      await sleep(300);
+    }
+    await writeFile(new URL("levels.json", CACHE), JSON.stringify({ at: new Date().toISOString(), levels }));
+  } catch (e) {
+    console.warn("Niveaux indisponibles : " + e.message);
+    levels = {};
+  }
+}
+
 const items = {};
 for (const [id, v] of Object.entries(fr.items)) {
-  items[id] = [v.name, en.items[id] ? en.items[id].name : "", v.grade || "", v.category || "", v.subCategory || "", v.marketKind === "kina-chests" ? 1 : 0];
+  const lv = levels[id] || [0, 0];
+  items[id] = [v.name, en.items[id] ? en.items[id].name : "", v.grade || "", v.category || "", v.subCategory || "", v.marketKind === "kina-chests" ? 1 : 0, lv[0], lv[1]];
 }
 const tab = x => (x.client && x.client.tab) || {};
 const recipes = fr.recipes

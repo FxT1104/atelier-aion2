@@ -14,6 +14,7 @@
     ["cons", "Consommables", ["Consumables", "Food", "Usable"]],
     ["misc", "Divers", ["Special", "Decor", "Event"]],
   ];
+  const SUB = { Ring: "Anneau", Earring: "Boucles d'oreilles", Earrings: "Boucles d'oreilles", Necklace: "Collier", Bracelet: "Bracelet", Greatsword: "Espadon", Sword: "Épée", Longsword: "Épée", Dagger: "Dague", Bow: "Arc", Staff: "Bâton", Mace: "Masse", Orb: "Orbe", Magicbook: "Grimoire", Spellbook: "Grimoire", Guarder: "Garde", Guard: "Garde", Helmet: "Casque", Torso: "Plastron", Pants: "Jambières", Boots: "Bottes", Gloves: "Gants", Shoulder: "Épaulières", Cape: "Cape", Belt: "Ceinture", Wing: "Ailes", Potion: "Potion", Food: "Nourriture", Scroll: "Parchemin" };
   const GRADE_RANK = { Common: 0, Rare: 1, Epic: 2, Unique: 3, Heroic: 4, Legendary: 5, Legend: 5, Mythic: 6, Special: 2 };
 
   // ================= État =================
@@ -41,6 +42,8 @@
   const nameOf = id => item(id)[0];
   const enOf = id => item(id)[1];
   const gradeOf = id => item(id)[2] || "Common";
+  const lvlOf = id => item(id)[6] || 0;
+  const lvlTag = l => l ? `<span class="tag lvl">niv. ${l}</span>` : "";
   const gdot = id => `<span class="g ${esc(gradeOf(id))}" aria-hidden="true"></span>`;
 
   // ================= Prix =================
@@ -188,8 +191,8 @@
       const [fr, en, grade] = item(id);
       const key = norm(fr) + "|" + grade;
       let g = GROUPS.get(key);
-      if (!g) { g = { key, name: fr, en, grade, ids: [], main, sub, craftable: false }; GROUPS.set(key, g); }
-      if (!g.ids.includes(id)) g.ids.push(id);
+      if (!g) { g = { key, name: fr, en, grade, ids: [], main, sub, craftable: false, lvl: 0, kind: item(id)[4] }; GROUPS.set(key, g); }
+      if (!g.ids.includes(id)) { g.ids.push(id); g.lvl = Math.max(g.lvl, lvlOf(id)); }
       if (!g.main && main) { g.main = main; g.sub = sub; }
       GROUP_OF.set(id, key);
       return g;
@@ -239,7 +242,7 @@
   }
   $("cats").addEventListener("click", e => {
     const b = e.target.closest("button[data-cat]"); if (!b) return;
-    catFilter = b.dataset.cat; renderCats(); openList(); goalInput.focus();
+    catFilter = b.dataset.cat; renderCats(); goalInput.value = ""; openList(); goalInput.focus();
   });
   function searchGroups(q, onlyCraftable, limit) {
     const n = norm(q).trim();
@@ -248,12 +251,12 @@
     for (const g of GROUPS.values()) {
       if (onlyCraftable && !g.craftable) continue;
       if (onlyCraftable && catFilter !== "all" && catOf(g) !== catFilter) continue;
-      const hay = norm(g.name) + " " + norm(g.en);
+      const hay = norm(g.name) + " " + norm(g.en) + (g.lvl ? " " + g.lvl : "");
       if (words.every(w => hay.includes(w))) out.push(g);
     }
     out.sort((a, b) => {
       const as = norm(a.name).startsWith(n) ? 0 : 1, bs = norm(b.name).startsWith(n) ? 0 : 1;
-      return as - bs || (GRADE_RANK[b.grade] || 0) - (GRADE_RANK[a.grade] || 0) || a.name.localeCompare(b.name, "fr");
+      return as - bs || b.lvl - a.lvl || (GRADE_RANK[b.grade] || 0) - (GRADE_RANK[a.grade] || 0) || a.name.localeCompare(b.name, "fr");
     });
     return limit ? out.slice(0, limit) : out;
   }
@@ -261,7 +264,7 @@
     listItems = searchGroups(goalInput.value, true, 60);
     activeIdx = listItems.length ? 0 : -1;
     goalList.innerHTML = listItems.length
-      ? listItems.map((g, i) => `<li role="option" id="opt-${i}" data-i="${i}" aria-selected="${i === activeIdx}"><span>${gdot(g.ids[0])}${esc(g.name)}</span><span class="sub">${esc(g.sub || g.main || "")}</span></li>`).join("")
+      ? listItems.map((g, i) => `<li role="option" id="opt-${i}" data-i="${i}" aria-selected="${i === activeIdx}"><span>${gdot(g.ids[0])}${esc(g.name)}</span><span class="sub">${g.lvl ? "niv. " + g.lvl + " · " : ""}${esc(SUB[g.kind] || SUB[g.sub] || g.sub || g.main || "")}</span></li>`).join("")
       : `<li class="none">Aucun objet fabricable ne correspond.</li>`;
     goalList.hidden = false; goalInput.setAttribute("aria-expanded", "true");
   }
@@ -289,7 +292,7 @@
     const sel = $("have");
     const g = GROUPS.get(goalKey);
     const ups = g ? upstreamGroups(g) : [];
-    sel.innerHTML = `<option value="">Rien</option>` + ups.map(u => `<option value="${esc(u.key)}">${esc(u.name)}</option>`).join("");
+    sel.innerHTML = `<option value="">Rien</option>` + ups.map(u => `<option value="${esc(u.key)}">${esc(u.name)}${u.lvl ? " (niv. " + u.lvl + ")" : ""}</option>`).join("");
     sel.value = ups.some(u => u.key === haveKey) ? haveKey : "";
     haveKey = sel.value;
   }
@@ -352,7 +355,7 @@
     const craft = bestCraft(S, g.ids);
     let buy = null; for (const id of g.ids) { const m = mkt(id); if (m != null && (!buy || m < buy.p)) buy = { id, p: m, n: PR.prices[id] ? PR.prices[id][1] : null }; }
 
-    const head = `<div class="goal-name">${gdot(g.ids[0])}${esc(g.name)}${qty > 1 ? " ×" + qty : ""}</div>`;
+    const head = `<div class="goal-name">${gdot(g.ids[0])}${esc(g.name)}${qty > 1 ? " ×" + qty : ""}${lvlTag(g.lvl)}</div>`;
     if (!craft) {
       out.innerHTML = `<div class="result"><div>${head}<div class="label">Coût de fabrication</div><div class="total">Impossible</div>
         <div class="muted small">Il manque le prix d'au moins un matériau sur ce serveur, ou l'objet ne se fabrique pas pour ta faction. Tu peux entrer un prix à la main dans l'onglet « Prix du marché ».</div></div>
@@ -391,7 +394,7 @@
       if (r[11] && s.t === "craft" && selfCombo(r)) notes.push(`Combo (${Math.round(r[11][2] / 100)} %) : donne ${r[11][1]} au lieu de ${r[2]}. Compté en moyenne : ${nf2.format(yieldOf(r))} par craft.`);
       else if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
       return `<article class="step${isEquip ? "" : " sub"}">
-        <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3><span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
+        <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3>${lvlTag((GROUPS.get(GROUP_OF.get(s.id)) || {}).lvl)}<span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
         <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${!isFinite(s.own) ? "—" : s.own < 0 ? `<span style="color:var(--good)">+ ${kinah(-s.own)} net</span>` : kinah(s.own)}</span></div>
         <div class="step-body"><div class="table-wrap"><table class="lines">${s.kids.map(k => k.t === "group" ? k.kids.map(row).join("") : row(k)).join("")}
         ${s.credit ? `<tr class="credit"><td class="q">×${qtyFmt(s.credit.qty)}</td><td>${esc(nameOf(s.credit.id))}<span class="en">revente des objets normaux</span></td><td class="v">− ${kinah(-s.credit.total)}</td></tr>` : ""}
@@ -429,7 +432,7 @@
       const v = overrides[id] != null ? overrides[id] : p ? p[0] : "";
       const bc = g.craftable ? bestCraft(S, g.ids) : null;
       const npc = CAT.npc[id] && npcPrice(id) != null ? ` · PNJ ${kinah(npcPrice(id))}` : "";
-      html += `<tr><td>${gdot(id)}${esc(g.name)}<span class="en">${esc(g.en)}${npc}</span></td>
+      html += `<tr><td>${gdot(id)}${esc(g.name)}${lvlTag(g.lvl)}<span class="en">${esc(g.en)}${npc}</span></td>
         <td class="r"><input id="p-${id}" data-id="${id}" inputmode="numeric" value="${v}" placeholder="aucune annonce" class="${overrides[id] != null ? "edited" : ""}" aria-label="Prix de ${esc(g.name)}"></td>
         <td class="r num muted">${p && p[1] != null ? p[1] : "—"}</td>
         <td class="r">${bc ? `<span class="num">${kinah(bc.unit)}</span><br><button class="linkish" type="button" data-goal="${esc(g.key)}">Détail</button>` : `<span class="muted">—</span>`}</td></tr>`;
