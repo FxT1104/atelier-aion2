@@ -387,27 +387,8 @@
       <div class="muted small num">${complete ? full(total) + " Kinah" : "Il manque des prix : voir les lignes en rouge."}</div></div>
       <div class="side">${side}</div></div>`;
     if (haveKey && !usedOwned) html += `<p class="notice info">Le calcul n'utilise pas ton « ${esc(GROUPS.get(haveKey).name)} » : il est moins cher de partir d'un autre chemin.</p>`;
-    if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Les étapes « combo » sont des moyennes : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)} en moyenne. Tu peux avoir plus ou moins de chance.</p>`;
+    if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Le coût compte les combos en moyenne : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)}. Tu peux avoir plus ou moins de chance.</p>`;
 
-    html += `<div class="section-title"><h2>Étapes</h2><span class="muted small">${steps.length} étape${steps.length > 1 ? "s" : ""}, dans l'ordre · montant = achats de l'étape</span></div><div class="steps">`;
-    html += steps.map((s, i) => {
-      const r = s.r;
-      const kind = s.t === "combo" ? `Combo (${Math.round(s.p * 100)} %) sur « ${esc(nameOf(r[1]))} »` : r[10].length ? "Transfert" : r[3] ? "Conversion" : "Craft";
-      const runs = s.t === "combo" ? `≈ ${qtyFmt(s.runs)} essais` : `${qtyFmt(s.runs)} craft${s.runs > 1 ? "s" : ""}`;
-      const isEquip = item(s.id)[3] === "Equip";
-      const notes = [];
-      if (r[10].length) notes.push("L'équipement précédent est consommé ; son enchantement est conservé. L'objet obtenu est lié au personnage.");
-      if (s.t === "combo" && s.credit) notes.push(`Les ${qtyFmt(s.credit.qty)} « ${nameOf(s.credit.id)} » obtenus en ratant le combo sont revendus (taxe de 12 % déduite).`);
-      if (r[11] && s.t === "craft" && selfCombo(r)) notes.push(`Combo (${Math.round(r[11][2] / 100)} %) : donne ${r[11][1]} au lieu de ${r[2]}. Compté en moyenne : ${nf2.format(yieldOf(r))} par craft.`);
-      else if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
-      return `<article class="step${isEquip ? "" : " sub"}">
-        <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3>${lvlTag((GROUPS.get(GROUP_OF.get(s.id)) || {}).lvl)}<span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
-        <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${!isFinite(s.own) ? "—" : s.own < 0 ? `<span style="color:var(--good)">+ ${kinah(-s.own)} net</span>` : kinah(s.own)}</span></div>
-        <div class="step-body"><div class="table-wrap"><table class="lines">${s.kids.map(k => k.t === "group" ? k.kids.map(row).join("") : row(k)).join("")}
-        ${s.credit ? `<tr class="credit"><td class="q">×${qtyFmt(s.credit.qty)}</td><td>${esc(nameOf(s.credit.id))}<span class="en">revente des objets normaux</span></td><td class="v">− ${kinah(-s.credit.total)}</td></tr>` : ""}
-        ${s.fee ? `<tr><td class="q"></td><td>Frais de fabrication</td><td class="v">${kinah(s.fee)}</td></tr>` : ""}
-        </table></div>${notes.map(t => `<p class="step-note">${esc(t)}</p>`).join("")}</div></article>`;
-    }).join("") + `</div>`;
 
     const rows = [...acc.map.values()].filter(l => l.t !== "owned").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
     html += `<div class="shop"><div class="section-title"><h2>À acheter</h2><span class="muted small">du plus cher au moins cher</span></div>
