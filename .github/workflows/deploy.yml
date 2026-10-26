@@ -29,6 +29,8 @@ jobs:
         run: node scripts/build-data.mjs
         env:
           A2T_HEADERS: ${{ secrets.A2T_HEADERS }}
+      - name: Forcer le rechargement du code après chaque modification
+        run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::7}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::7}\"/" site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
