@@ -387,7 +387,7 @@
       if (r[11] && s.t === "craft") notes.push(`Combo possible (${Math.round(r[11][2] / 100)} %) : donne « ${nameOf(r[11][0])} » à la place.`);
       return `<article class="step${isEquip ? "" : " sub"}">
         <div class="step-head"><div class="step-title"><span class="label">Étape ${i + 1}</span><h3>${gdot(s.id)}${esc(nameOf(s.id))}${s.qty !== 1 ? " ×" + qtyFmt(s.qty) : ""}</h3><span class="chip">${kind}</span><span class="muted small">${runs} · ${esc(PROF[r[4]] || r[4])}${r[5] ? " · maîtrise " + r[5] : ""}</span></div>
-        <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${isFinite(s.own) ? kinah(s.own) : "—"}</span></div>
+        <span class="step-cost" title="Achats de cette étape ; les objets fabriqués sont comptés dans leur propre étape">${!isFinite(s.own) ? "—" : s.own < 0 ? `<span style="color:var(--good)">+ ${kinah(-s.own)} net</span>` : kinah(s.own)}</span></div>
         <div class="step-body"><div class="table-wrap"><table class="lines">${s.kids.map(k => k.t === "group" ? k.kids.map(row).join("") : row(k)).join("")}
         ${s.credit ? `<tr class="credit"><td class="q">×${qtyFmt(s.credit.qty)}</td><td>${esc(nameOf(s.credit.id))}<span class="en">revente des objets normaux</span></td><td class="v">− ${kinah(-s.credit.total)}</td></tr>` : ""}
         ${s.fee ? `<tr><td class="q"></td><td>Frais de fabrication</td><td class="v">${kinah(s.fee)}</td></tr>` : ""}
