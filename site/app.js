@@ -242,7 +242,10 @@
   }
   $("cats").addEventListener("click", e => {
     const b = e.target.closest("button[data-cat]"); if (!b) return;
-    catFilter = b.dataset.cat; renderCats(); goalInput.value = ""; openList(); goalInput.focus();
+    catFilter = b.dataset.cat;
+    // On met juste à jour les boutons (les recréer ferait croire à un clic en dehors de la recherche).
+    $("cats").querySelectorAll("button[data-cat]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.cat === catFilter)));
+    goalInput.value = ""; openList(); goalInput.focus();
   });
   function searchGroups(q, onlyCraftable, limit) {
     const n = norm(q).trim();
@@ -289,7 +292,7 @@
     else if (e.key === "Escape") { closeList(); }
   });
   goalList.addEventListener("mousedown", e => { const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); pickGoal(listItems[Number(li.dataset.i)]); } });
-  document.addEventListener("click", e => { if (!$("goal-combo").contains(e.target) && !$("cats").contains(e.target)) { closeList(); if (goalKey && GROUPS.get(goalKey)) goalInput.value = GROUPS.get(goalKey).name; } });
+  document.addEventListener("click", e => { if (e.target.isConnected && !$("goal-combo").contains(e.target) && !$("cats").contains(e.target)) { closeList(); if (goalKey && GROUPS.get(goalKey)) goalInput.value = GROUPS.get(goalKey).name; } });
 
   function fillHave() {
     const sel = $("have");
