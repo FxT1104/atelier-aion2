@@ -366,7 +366,8 @@
     if (!craft) {
       out.innerHTML = `<div class="result"><div>${head}<div class="label">Coût de fabrication</div><div class="total">Impossible</div>
         <div class="muted small">Il manque le prix d'au moins un matériau sur ce serveur, ou l'objet ne se fabrique pas pour ta faction. Tu peux entrer un prix à la main dans l'onglet « Prix du marché ».</div></div>
-        <div class="side">${buy ? `<span class="label">Achat direct</span><span class="num">${kinah(buy.p * qty)}</span>` : ""}</div></div>` + missingList(S, g);
+        <div class="side">${buy ? `<span class="label">Achat direct</span><span class="num">${kinah(buy.p * qty)}</span>` : ""}</div></div>` + chartSlot(g) + missingList(S, g);
+      decorate(g);
       return;
     }
     const owned1 = new Map([...owned].map(id => [id, 1]));
@@ -386,6 +387,7 @@
       <div class="total">${complete ? kinah(total) : "Incomplet"}${complete ? "<small>Kinah</small>" : ""}</div>
       <div class="muted small num">${complete ? full(total) + " Kinah" : "Il manque des prix : voir les lignes en rouge."}</div></div>
       <div class="side">${side}</div></div>`;
+    html += chartSlot(g);
     if (haveKey && !usedOwned) html += `<p class="notice info">Le calcul n'utilise pas ton « ${esc(GROUPS.get(haveKey).name)} » : il est moins cher de partir d'un autre chemin.</p>`;
     if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Le coût compte les combos en moyenne : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)}. Tu peux avoir plus ou moins de chance.</p>`;
 
@@ -396,16 +398,17 @@
     const fmtQ = q => Number.isInteger(q) ? nf.format(q) : "≈ " + nf.format(Math.ceil(q));
     html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><button class="btn small-btn" id="copyList" type="button">Copier la liste</button></div>
       <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
-      <div class="table-wrap"><table class="shoplist"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="shoplist${PROXY ? "" : " no-trend"}"><thead><tr><th class="r">Quantité</th><th>Matériau</th><th class="r">Prix à l'unité</th><th class="r">Total</th><th class="r trend-h" title="Prix actuel comparé à sa moyenne des 7 derniers jours">vs 7 j</th></tr></thead><tbody>
       ${rows.map(l => `<tr class="${l.t === "missing" ? "missing" : ""}"><td class="r num qcol">${fmtQ(l.qty)}</td>
         <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
         <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
-        <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td></tr>`).join("")}
-      ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td></tr>`).join("")}
-      ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td></tr>` : ""}
-      </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td></tr></tfoot></table></div></div>`;
+        <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td><td class="r trend" ${l.t === "buy" ? `data-trend="${l.id}"` : ""}></td></tr>`).join("")}
+      ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td><td class="trend"></td></tr>`).join("")}
+      ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td><td class="trend"></td></tr>` : ""}
+      </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td><td class="trend"></td></tr></tfoot></table></div></div>`;
     window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
     out.innerHTML = html;
+    decorate(g);
   }
   $("out").addEventListener("click", async e => {
     const b = e.target.closest("#copyList"); if (!b) return;
@@ -422,6 +425,99 @@
     if (!miss.size) return "";
     return `<p class="notice">Sans prix ni recette disponible : ${[...miss].map(i => esc(nameOf(i))).join(", ")}.</p>`;
   }
+
+  // ================= Historique des prix (relais Cloudflare) =================
+  let PROXY = "", histDays = 7, decoSeq = 0;
+  const HIST = new Map(); // "serveur|jours|id" → { obs } ou null
+  const marketId = g => g.ids.find(id => PR.prices[id]) || null;
+  function chartSlot(g) {
+    if (!PROXY) return "";
+    const id = marketId(g);
+    if (!id) return `<div class="chart-card"><div class="chart-head"><h2>Prix sur l'hôtel des ventes</h2></div><p class="muted small">Pas d'historique : cet objet n'est pas en vente sur ce serveur.</p></div>`;
+    return `<div class="chart-card" id="chartCard"><div class="chart-head"><h2>Est-ce le bon moment ?</h2>
+      <div class="seg" role="group" aria-label="Période">${[1, 7, 30].map(d => `<button type="button" data-days="${d}" aria-pressed="${d === histDays}">${d === 1 ? "24 h" : d + " j"}</button>`).join("")}</div></div>
+      <div id="chartBody" class="chart-body"><p class="muted small">Chargement de l'historique…</p></div></div>`;
+  }
+  async function getHistory(ids, days) {
+    const want = ids.filter(id => !HIST.has(server.id + "|" + days + "|" + id));
+    for (let i = 0; i < want.length; i += 30) {
+      const chunk = want.slice(i, i + 30);
+      try {
+        const res = await fetch(`${PROXY}/history?server=${server.id}&days=${days}&items=${chunk.join(",")}`);
+        const d = res.ok ? await res.json() : null;
+        for (const id of chunk) HIST.set(server.id + "|" + days + "|" + id, d && d.items ? d.items[id] || null : null);
+      } catch (e) {
+        for (const id of chunk) HIST.set(server.id + "|" + days + "|" + id, null);
+      }
+    }
+    return Object.fromEntries(ids.map(id => [id, HIST.get(server.id + "|" + days + "|" + id)]));
+  }
+  function stats(obs, current) {
+    const prices = obs.map(o => o[1]);
+    if (!prices.length) return null;
+    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const min = Math.min(...prices), max = Math.max(...prices);
+    const cur = current != null ? current : prices[prices.length - 1];
+    const below = prices.filter(p => p < cur).length / prices.length;
+    return { avg, min, max, cur, diff: (cur - avg) / avg, below, n: prices.length };
+  }
+  async function decorate(g) {
+    if (!PROXY || !server) return;
+    const seq = ++decoSeq;
+    const id = marketId(g);
+    const trendIds = [...document.querySelectorAll("[data-trend]")].map(td => Number(td.dataset.trend));
+    const days = histDays;
+    const [h7, hd] = await Promise.all([getHistory(trendIds, 7), id ? getHistory([id], days) : Promise.resolve({})]);
+    if (seq !== decoSeq) return;
+    for (const td of document.querySelectorAll("[data-trend]")) {
+      const tid = Number(td.dataset.trend), h = h7[tid];
+      const st = h && h.obs && h.obs.length > 2 ? stats(h.obs, mkt(tid)) : null;
+      if (!st) { td.innerHTML = `<span class="muted small">—</span>`; continue; }
+      const pct = Math.round(st.diff * 100);
+      const cls = pct <= -5 ? "good" : pct >= 5 ? "warn" : "ghost";
+      td.innerHTML = `<span class="chip ${cls}" title="Moyenne 7 j : ${kinah(st.avg)} · min ${kinah(st.min)} · max ${kinah(st.max)}">${pct > 0 ? "+" : pct < 0 ? "−" : ""}${Math.abs(pct)} %</span>`;
+    }
+    const body = $("chartBody");
+    if (!id || !body) return;
+    const h = hd[id];
+    if (!h || !h.obs || h.obs.length < 2) { body.innerHTML = `<p class="muted small">Pas assez de relevés sur cette période pour tracer la courbe.</p>`; return; }
+    const st = stats(h.obs, mkt(id));
+    const pct = Math.round(st.diff * 100);
+    const verdict = st.below <= 0.25 ? ["good", "Prix bas en ce moment"] : st.below >= 0.75 ? ["warn", "Prix élevé en ce moment"] : ["ghost", "Prix dans la normale"];
+    const period = days === 1 ? "24 h" : days + " jours";
+    body.innerHTML = `<div class="chart-stats">
+        <span class="chip ${verdict[0]}">${verdict[1]}</span>
+        <span class="small">Actuel <b class="num">${kinah(st.cur)}</b></span>
+        <span class="small">${pct === 0 ? "égal à" : Math.abs(pct) + " % " + (pct < 0 ? "sous" : "au-dessus de")} la moyenne ${days === 1 ? "sur 24 h" : "sur " + period} (<span class="num">${kinah(st.avg)}</span>)</span>
+        <span class="small muted">min <span class="num">${kinah(st.min)}</span> · max <span class="num">${kinah(st.max)}</span></span>
+      </div>${chartSvg(h.obs, st, days)}<p class="muted small">Prix le plus bas demandé, relevé par A2-Tracker (${st.n} relevés sur ${period}).</p>`;
+  }
+  function chartSvg(obs, st, days) {
+    const W = 640, H = 200, L = 64, R = 12, T = 12, B = 26;
+    const t0 = obs[0][0], t1 = Math.max(obs[obs.length - 1][0], Math.floor(Date.now() / 1000));
+    const pad = (st.max - st.min) * 0.1 || st.max * 0.05 || 1;
+    const y0 = Math.max(0, st.min - pad), y1 = st.max + pad;
+    const X = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
+    const Y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    let d = "";
+    obs.forEach((o, i) => { d += (i ? `H${X(o[0]).toFixed(1)}V${Y(o[1]).toFixed(1)}` : `M${X(o[0]).toFixed(1)},${Y(o[1]).toFixed(1)}`); });
+    d += `H${X(t1).toFixed(1)}`;
+    const area = d + `V${(H - B).toFixed(1)}H${X(t0).toFixed(1)}Z`;
+    const grid = [st.min, st.avg, st.max].map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" class="${v === st.avg ? "c-avg" : "c-grid"}"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" class="c-lab">${kinah(v)}</text>`).join("");
+    const fmtD = t => new Date(t * 1000).toLocaleString("fr-FR", days === 1 ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" });
+    const last = obs[obs.length - 1];
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution du prix">
+      ${grid}<path d="${area}" class="c-area"/><path d="${d}" class="c-line"/>
+      <circle cx="${X(t1).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="4" class="c-dot"/>
+      <text x="${L}" y="${H - 6}" class="c-lab">${fmtD(t0)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="c-lab">maintenant</text>
+      <text x="${W - R}" y="${(Y(st.avg) - 5).toFixed(1)}" text-anchor="end" class="c-lab">moyenne</text></svg>`;
+  }
+  $("out").addEventListener("click", e => {
+    const b = e.target.closest(".seg button[data-days]"); if (!b) return;
+    histDays = Number(b.dataset.days);
+    b.parentElement.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    const g = GROUPS.get(goalKey); if (g) { $("chartBody").innerHTML = `<p class="muted small">Chargement de l'historique…</p>`; decorate(g); }
+  });
 
   // ================= Onglet prix =================
   function renderPrices() {
@@ -508,6 +604,7 @@
     try {
       const [cat, srv] = await Promise.all([fetch("data/catalog.json", { cache: "no-cache" }).then(r => r.json()), fetch("data/servers.json", { cache: "no-cache" }).then(r => r.json())]);
       CAT = cat; SERVERS = srv.servers;
+      try { const cfg = await fetch("config.json", { cache: "no-cache" }).then(r => r.json()); PROXY = String(cfg.proxy || "").replace(/\/$/, ""); } catch (e) { PROXY = ""; }
     } catch (e) {
       $("out").innerHTML = `<p class="notice">Les données n'ont pas pu être chargées. Recharge la page dans un instant.</p>`; return;
     }

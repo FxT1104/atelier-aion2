@@ -163,3 +163,20 @@ footer { font-size: .8rem; color: var(--muted); display: grid; gap: 4px; }
 .shoplist tr.missing td { color: var(--bad); }
 .shoplist tr.credit td, .shoplist tr.owned td { color: var(--good); }
 .shoplist tfoot td { border-bottom: 0; border-top: 1px solid var(--line); font-weight: 600; padding-top: 10px; }
+.chart-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; }
+.chart-head { display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; align-items: center; }
+.chart-body { display: grid; gap: 8px; }
+.chart-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 4px 12px; font-size: .82rem; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--plum-soft); color: var(--plum); font-weight: 600; }
+.chart { width: 100%; height: auto; display: block; }
+.chart .c-line { fill: none; stroke: var(--plum); stroke-width: 2; stroke-linejoin: round; }
+.chart .c-area { fill: var(--plum-soft); opacity: .7; stroke: none; }
+.chart .c-grid { stroke: var(--line); stroke-width: 1; }
+.chart .c-avg { stroke: var(--brass); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .c-dot { fill: var(--brass); stroke: var(--surface); stroke-width: 2; }
+.chart .c-lab { fill: var(--muted); font: 11px var(--f-mono); }
+.shoplist td.trend { white-space: nowrap; }
+.shoplist .trend .chip { font-family: var(--f-mono); font-size: .75rem; padding: 1px 8px; }
+.no-trend .trend, .no-trend .trend-h { display: none; }
