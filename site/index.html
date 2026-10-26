@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Atelier Aion 2</title>
+<meta name="description" content="Combien coûte un craft d'Aion 2 sur ton serveur : de ce que tu as déjà jusqu'à ton objectif, avec les prix de l'hôtel des ventes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="label">Aion 2 · calculateur de craft</div>
+      <h1>Atelier Aion 2</h1>
+    </div>
+    <div class="server">
+      <label class="field inline" for="server"><span class="label">Serveur</span>
+        <select id="server"><option>Chargement…</option></select>
+      </label>
+      <span class="chip ghost" id="freshness">Prix : chargement…</span>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-calc" aria-selected="true" aria-controls="view-calc" type="button">Calcul</button>
+    <button role="tab" id="tab-prix" aria-selected="false" aria-controls="view-prix" type="button">Prix du marché</button>
+  </nav>
+
+  <section id="view-calc" class="view" role="tabpanel" aria-labelledby="tab-calc">
+    <div class="picker">
+      <div class="field">
+        <span class="label" id="goal-label">Objectif</span>
+        <div class="combo" id="goal-combo">
+          <input id="goal" type="search" autocomplete="off" spellcheck="false" placeholder="Cherche un objet à fabriquer (ex. anneau, épée, potion…)" aria-labelledby="goal-label" aria-controls="goal-list" aria-expanded="false" role="combobox">
+          <ul id="goal-list" class="combo-list" role="listbox" hidden></ul>
+        </div>
+        <div class="cats" id="cats" role="group" aria-label="Catégorie"></div>
+      </div>
+      <div class="picker-row">
+        <label class="field" for="have">
+          <span class="label">J'ai déjà</span>
+          <select id="have"><option value="">Rien</option></select>
+        </label>
+        <label class="field qty" for="qty">
+          <span class="label">Quantité</span>
+          <input id="qty" type="number" min="1" max="999" step="1" value="1" inputmode="numeric">
+        </label>
+      </div>
+      <details class="opts">
+        <summary>Options du calcul</summary>
+        <label class="toggle" for="optCombo"><input type="checkbox" id="optCombo" checked> Utiliser les combos (25 %) pour obtenir les versions éclatantes quand c'est moins cher</label>
+        <label class="toggle" for="optResale"><input type="checkbox" id="optResale" checked> Déduire la revente des objets normaux obtenus en ratant le combo (taxe de 12 % déduite)</label>
+        <label class="toggle" for="optNpc"><input type="checkbox" id="optNpc" checked> Acheter chez les marchands PNJ quand c'est possible</label>
+      </details>
+    </div>
+
+    <div id="out" aria-live="polite">
+      <div class="empty">Choisis un objectif pour voir ce qu'il te coûte.</div>
+    </div>
+  </section>
+
+  <section id="view-prix" class="view" role="tabpanel" aria-labelledby="tab-prix" hidden>
+    <div class="picker">
+      <label class="field" for="psearch"><span class="label">Rechercher un objet</span>
+        <input id="psearch" type="search" autocomplete="off" spellcheck="false" placeholder="Nom en français ou en anglais">
+      </label>
+      <p class="muted small">Prix le plus bas demandé à l'hôtel des ventes du serveur choisi. Tu peux remplacer un prix pour tester un autre scénario : la modification reste sur ton appareil et s'applique à tous les calculs.</p>
+    </div>
+    <div class="table-wrap"><table class="ptable" id="ptable"></table></div>
+    <p><button class="btn" id="resetEdits" type="button">Effacer mes prix modifiés</button></p>
+  </section>
+
+  <footer>
+    <span>Prix et recettes : <a href="https://a2-tracker.com/" target="_blank" rel="noopener">A2-Tracker</a>, avec leur accord. Prix affichés avec 5 minutes de retard, site mis à jour environ toutes les 10 minutes.</span>
+    <span>Ce sont des prix demandés, pas des ventes conclues. Le calcul suppose que chaque craft réussit ; les recettes viennent des fichiers du jeu et peuvent avoir un patch de retard. Outil non officiel, non affilié à NCSOFT.</span>
+  </footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
