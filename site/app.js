@@ -24,7 +24,7 @@
   let goalKey = null, haveKey = "", catFilter = "all";
   let GROUPS = new Map();      // clé de nom → { key, name, en, grade, ids: [], main, sub }
   let GROUP_OF = new Map();    // id → clé
-  let RECIPES = [], BY_OUT = new Map(), BY_COMBO = new Map();
+  let RECIPES = [], BY_OUT = new Map(), BY_COMBO = new Map(), UPG = new Map();
 
   function load(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
@@ -63,18 +63,72 @@
   // Un combo qui donne le même objet (souvent en plus grande quantité) augmente juste le rendement moyen.
   const selfCombo = r => r[11] && r[11][2] > 0 && GROUP_OF.get(r[11][0]) === GROUP_OF.get(r[1]);
   const yieldOf = r => selfCombo(r) && $("optCombo").checked ? (1 - r[11][2] / 10000) * r[2] + (r[11][2] / 10000) * r[11][1] : r[2];
-  // Coût minimal de chaque objet : achat (HV ou PNJ), craft, ou combo depuis une recette parente.
+  // Objet introuvable à l'achat (ni HV, ni PNJ, ni recette) : il faudra l'obtenir en jeu.
+  // On lui donne un coût énorme pour que le calcul ne l'utilise que s'il n'y a pas d'autre chemin.
+  const FARM = 1e12;
+  // Toutes les façons d'utiliser une recette : craft simple, ou combo vers l'objet supérieur.
+  //  - « retry » : on recommence jusqu'au combo (en moyenne 1/p essais) ; les objets normaux obtenus
+  //    peuvent être revendus si l'option est cochée.
+  //  - « upgrade » : on crafte une fois ; si le combo ne tombe pas (1 - p), on améliore l'objet normal
+  //    avec la recette suivante (transfert). C'est le cas de toutes les lignées d'équipement.
+  function recipeOptions(S, r) {
+    const out = [];
+    const total = S.inputsCost(r);
+    if (!isFinite(total)) return out;
+    out.push({ id: r[1], unit: total / yieldOf(r), how: { t: "craft", r } });
+    if (!$("optCombo").checked || !r[11] || !(r[11][2] > 0) || selfCombo(r)) return out;
+    const p = r[11][2] / 10000, tries = 1 / p, cq = r[11][1];
+    const retry = S.inputsCost(r, true);
+    if (isFinite(retry)) {
+      const sell = S.useResale ? (mkt(r[1]) || 0) * (1 - TAX) * r[2] : 0;
+      const unit = Math.max(0, total + (tries - 1) * retry - (tries - 1) * sell) / cq;
+      out.push({ id: r[11][0], unit, how: { t: "combo", mode: "retry", r } });
+    }
+    if (r[2] === 1 && cq === 1) for (const r2 of UPG.get(r[0]) || []) {
+      const extra = S.extraCost(r2);
+      if (!isFinite(extra)) continue;
+      out.push({ id: r[11][0], unit: total + (1 - p) * extra, how: { t: "combo", mode: "upgrade", r, r2 } });
+    }
+    return out;
+  }
+
+  // Coût minimal de chaque objet : achat (HV ou PNJ), craft, combo, ou à obtenir en jeu.
   function solve(ownedIds, o = {}) {
-    const useCombo = $("optCombo").checked, useResale = o.resale != null ? o.resale : $("optResale").checked;
-    const cost = new Map(), how = new Map();
+    const useResale = o.resale != null ? o.resale : $("optResale").checked;
+    const cost = new Map(), how = new Map(), base = new Map();
     const c = id => { const v = cost.get(id); return v == null ? Infinity : v; };
     for (const id of Object.keys(CAT.items)) {
-      const m = mkt(id), n = npcPrice(id);
-      if (n != null && (m == null || n <= m)) { cost.set(Number(id), n); how.set(Number(id), { t: "npc" }); }
-      else if (m != null) { cost.set(Number(id), m); how.set(Number(id), { t: "buy" }); }
+      const m = mkt(id), n = npcPrice(id), k = Number(id);
+      if (n != null && (m == null || n <= m)) { cost.set(k, n); how.set(k, { t: "npc" }); }
+      else if (m != null) { cost.set(k, m); how.set(k, { t: "buy" }); }
     }
+    // Tout ce qu'aucune recette ne produit et qui ne s'achète pas : à obtenir en jeu.
+    const mark = id => { if (!cost.has(id)) { cost.set(id, FARM); how.set(id, { t: "farm" }); } };
+    for (const r of RECIPES) {
+      for (const [i, , alts] of r[9]) { mark(i); for (const [a] of alts) mark(a); }
+      for (const a of r[10]) mark(a);
+    }
+    for (const [id, v] of cost) base.set(id, v);
     for (const id of ownedIds) { cost.set(id, 0); how.set(id, { t: "owned" }); }
-    const inputsCost = r => {
+    // retry = true : pour les essais supplémentaires d'un combo, l'objet possédé (un seul exemplaire) doit être racheté.
+    const inputsCost = (r, retry) => {
+      const cc = retry ? (id => ownedIds.has(id) ? (base.has(id) ? base.get(id) : Infinity) : c(id)) : c;
+      let total = r[12] || 0;
+      for (const [id, q, alts] of r[9]) {
+        let best = cc(id) * q;
+        for (const [a, qa] of alts) best = Math.min(best, cc(a) * qa);
+        if (!isFinite(best)) return Infinity;
+        total += best;
+      }
+      if (r[10].length) {
+        let m = Infinity; for (const a of r[10]) m = Math.min(m, cc(a));
+        if (!isFinite(m)) return Infinity;
+        total += m;
+      }
+      return total;
+    };
+    // Coût d'une recette de transfert sans l'équipement transféré (celui-ci est déjà en main).
+    const extraCost = r => {
       let total = r[12] || 0;
       for (const [id, q, alts] of r[9]) {
         let best = c(id) * q;
@@ -82,50 +136,30 @@
         if (!isFinite(best)) return Infinity;
         total += best;
       }
-      if (r[10].length) {
-        let m = Infinity; for (const a of r[10]) m = Math.min(m, c(a));
-        if (!isFinite(m)) return Infinity;
-        total += m;
-      }
       return total;
     };
+    const S = { cost, how, c, inputsCost, extraCost, useResale };
     for (let pass = 0; pass < 60; pass++) {
       let changed = false;
       for (const r of RECIPES) {
-        const total = inputsCost(r);
-        if (!isFinite(total)) continue;
-        const unit = total / yieldOf(r);
-        if (unit < c(r[1]) - 0.01 && !ownedIds.has(r[1])) { cost.set(r[1], unit); how.set(r[1], { t: "craft", r }); changed = true; }
-        if (useCombo && r[11] && r[11][2] > 0 && !selfCombo(r)) {
-          const p = r[11][2] / 10000, tries = 1 / p;
-          const sell = useResale ? (mkt(r[1]) || 0) * (1 - TAX) * r[2] : 0;
-          const exp = Math.max(0, tries * total - (tries - 1) * sell) / r[11][1];
-          if (exp < c(r[11][0]) - 0.01 && !ownedIds.has(r[11][0])) { cost.set(r[11][0], exp); how.set(r[11][0], { t: "combo", r }); changed = true; }
+        for (const opt of recipeOptions(S, r)) {
+          if (ownedIds.has(opt.id)) continue;
+          if (opt.unit < c(opt.id) - 0.01) { cost.set(opt.id, opt.unit); how.set(opt.id, opt.how); changed = true; }
         }
       }
       if (!changed) break;
     }
-    return { cost, how, c, inputsCost };
+    return S;
   }
 
   // Meilleure façon de fabriquer (sans l'acheter) un objet du groupe visé.
   function bestCraft(S, ids) {
-    const useCombo = $("optCombo").checked, useResale = $("optResale").checked;
+    const want = new Set(ids);
     let best = null;
-    for (const id of ids) {
-      for (const r of BY_OUT.get(id) || []) {
-        const total = S.inputsCost(r); if (!isFinite(total)) continue;
-        const unit = total / yieldOf(r);
-        if (!best || unit < best.unit) best = { id, unit, how: { t: "craft", r } };
-      }
-      if (useCombo) for (const r of BY_COMBO.get(id) || []) {
-        if (selfCombo(r)) continue;
-        const total = S.inputsCost(r); if (!isFinite(total)) continue;
-        const p = r[11][2] / 10000, tries = 1 / p;
-        const sell = useResale ? (mkt(r[1]) || 0) * (1 - TAX) * r[2] : 0;
-        const unit = Math.max(0, tries * total - (tries - 1) * sell) / r[11][1];
-        if (!best || unit < best.unit) best = { id, unit, how: { t: "combo", r } };
-      }
+    const seen = new Set();
+    for (const id of ids) for (const r of [...(BY_OUT.get(id) || []), ...(BY_COMBO.get(id) || [])]) {
+      if (seen.has(r[0])) continue; seen.add(r[0]);
+      for (const opt of recipeOptions(S, r)) if (want.has(opt.id) && (!best || opt.unit < best.unit)) best = opt;
     }
     return best;
   }
@@ -135,44 +169,58 @@
     const h = forced || S.how.get(id);
     const node = { id, qty, t: h ? h.t : "missing", total: 0, kids: [], notes: [] };
     if (!h || (!forced && !isFinite(S.c(id)))) { node.t = "missing"; node.total = NaN; return node; }
+    if (h.t === "farm") return node;
     if (h.t === "owned") {
       const left = ownedLeft.get(id) || 0;
       if (left >= qty) { ownedLeft.set(id, left - qty); return node; }
-      // On ne possède qu'un exemplaire : le reste s'achète.
+      // On ne possède qu'un exemplaire : le reste s'achète (ou s'obtient en jeu).
       ownedLeft.set(id, 0);
-      const extra = qty - left;
-      const m = mkt(id);
-      node.qty = left; node.t = "owned";
-      const more = { id, qty: extra, t: m == null ? "missing" : "buy", total: m == null ? NaN : m * extra, kids: [], notes: [] };
-      return { id, qty, t: "group", total: more.total, kids: [node, more], notes: [] };
+      const extra = qty - left, m = mkt(id);
+      node.qty = left;
+      const more = { id, qty: extra, t: m == null ? "farm" : "buy", unit: m, total: m == null ? 0 : m * extra, kids: [], notes: [] };
+      return { id, qty, t: "group", total: more.total, kids: left > 0 ? [node, more] : [more], notes: [] };
     }
     if (h.t === "buy" || h.t === "npc") { node.total = S.c(id) * qty; node.unit = S.c(id); return node; }
     if (stack.has(id)) { node.t = "missing"; node.total = NaN; return node; }
     stack.add(id);
     const r = h.r;
-    let runs, made;
-    if (h.t === "craft") { runs = Math.ceil(qty / yieldOf(r) - 1e-9); made = runs * r[2]; node.runs = runs; }
-    else {
+    node.r = r;
+    const addInputs = (rec, runs, expected) => {
+      for (const [iid, q, alts] of rec[9]) {
+        let pick = iid, pq = q, best = S.c(iid) * q;
+        for (const [a, qa] of alts) if (S.c(a) * qa < best) { best = S.c(a) * qa; pick = a; pq = qa; }
+        const k = expand(S, pick, pq * runs, stack, null, ownedLeft); if (expected) k.expected = true;
+        node.kids.push(k);
+      }
+      if (rec[12]) node.fee = (node.fee || 0) + rec[12] * runs;
+    };
+    const addTransfer = (rec, runs) => {
+      if (!rec[10].length) return;
+      let pick = rec[10][0];
+      for (const a of rec[10]) if (S.c(a) < S.c(pick)) pick = a;
+      const k = expand(S, pick, runs, stack, null, ownedLeft); k.transfer = true;
+      node.kids.push(k);
+    };
+    if (h.t === "craft") {
+      const runs = Math.ceil(qty / yieldOf(r) - 1e-9);
+      node.runs = runs;
+      addInputs(r, runs); addTransfer(r, runs);
+    } else if (h.mode === "upgrade") {
+      // Un craft ; si le combo rate, on améliore l'objet normal (dépense comptée en moyenne).
+      const p = r[11][2] / 10000;
+      node.runs = qty; node.p = p; node.mode = "upgrade"; node.r2 = h.r2;
+      addInputs(r, qty); addTransfer(r, qty);
+      addInputs(h.r2, (1 - p) * qty, true);
+    } else {
       const p = r[11][2] / 10000, tries = 1 / p;
-      runs = qty / r[11][1] * tries; node.runs = runs; node.p = p;
-      if ($("optResale").checked && mkt(r[1]) != null) {
+      const runs = qty / r[11][1] * tries;
+      node.runs = runs; node.p = p; node.mode = "retry";
+      addInputs(r, runs); addTransfer(r, runs);
+      if (S.useResale && mkt(r[1]) != null) {
         const extra = (runs - qty / r[11][1]) * r[2];
         node.credit = { id: r[1], qty: extra, total: -extra * mkt(r[1]) * (1 - TAX) };
       }
     }
-    node.r = r;
-    for (const [iid, q, alts] of r[9]) {
-      let pick = iid, pq = q, best = S.c(iid) * q;
-      for (const [a, qa] of alts) if (S.c(a) * qa < best) { best = S.c(a) * qa; pick = a; pq = qa; }
-      node.kids.push(expand(S, pick, pq * runs, stack, null, ownedLeft));
-    }
-    if (r[10].length) {
-      let pick = r[10][0];
-      for (const a of r[10]) if (S.c(a) < S.c(pick)) pick = a;
-      const k = expand(S, pick, runs, stack, null, ownedLeft); k.transfer = true;
-      node.kids.push(k);
-    }
-    if (r[12]) node.fee = r[12] * runs;
     stack.delete(id);
     node.total = node.kids.reduce((a, k) => a + k.total, 0) + (node.fee || 0) + (node.credit ? node.credit.total : 0);
     return node;
@@ -203,6 +251,16 @@
       if (r[11]) addTo(r[11][0], r[7], r[8]).craftable = true;
       for (const [i, , alts] of r[9]) { addTo(i, "", ""); for (const [a] of alts) addTo(a, "", ""); }
       for (const a of r[10]) addTo(a, "", "");
+    }
+    // Pour chaque recette à combo : les recettes de transfert qui améliorent l'objet normal en objet du combo.
+    UPG = new Map();
+    const byGroup = new Map();
+    for (const r of RECIPES) { const k = GROUP_OF.get(r[1]); if (!byGroup.has(k)) byGroup.set(k, []); byGroup.get(k).push(r); }
+    for (const r of RECIPES) {
+      if (!r[11] || selfCombo(r)) continue;
+      const target = GROUP_OF.get(r[11][0]), from = GROUP_OF.get(r[1]);
+      const ups = (byGroup.get(target) || []).filter(r2 => r2[10].some(a => GROUP_OF.get(a) === from));
+      if (ups.length) UPG.set(r[0], ups);
     }
   }
 
@@ -305,7 +363,7 @@
   }
   $("have").addEventListener("change", () => { haveKey = $("have").value; compute(); });
   $("qty").addEventListener("change", () => { const v = Math.max(1, Math.min(999, Math.round(Number($("qty").value) || 1))); $("qty").value = v; compute(); });
-  for (const id of ["optCombo", "optResale", "optNpc"]) $(id).addEventListener("change", () => { save("atelier-opts", { combo: $("optCombo").checked, resale: $("optResale").checked, npc: $("optNpc").checked }); compute(); });
+  for (const id of ["optCombo", "optResale", "optNpc"]) $(id).addEventListener("change", () => { save("atelier-opts2", { combo: $("optCombo").checked, resale: $("optResale").checked, npc: $("optNpc").checked }); compute(); });
 
   // ================= Calcul et affichage =================
   function srcTag(n) {
@@ -352,6 +410,13 @@
   }
 
   function compute() {
+    try { computeInner(); }
+    catch (e) {
+      console.error(e);
+      $("out").innerHTML = `<p class="notice">Le calcul a rencontré une erreur pour cet objet (${esc(e && e.message || e)}). Recharge la page ; si ça continue, signale l'objet concerné.</p>`;
+    }
+  }
+  function computeInner() {
     writeUrl();
     const out = $("out");
     const g = GROUPS.get(goalKey);
@@ -364,8 +429,8 @@
 
     const head = `<div class="goal-name">${gdot(g.ids[0])}${esc(g.name)}${qty > 1 ? " ×" + qty : ""}${lvlTag(g.lvl)}</div>`;
     if (!craft) {
-      out.innerHTML = `<div class="result"><div>${head}<div class="label">Coût de fabrication</div><div class="total">Impossible</div>
-        <div class="muted small">Il manque le prix d'au moins un matériau sur ce serveur, ou l'objet ne se fabrique pas pour ta faction. Tu peux entrer un prix à la main dans l'onglet « Prix du marché ».</div></div>
+      out.innerHTML = `<div class="result"><div>${head}<div class="label">Coût de fabrication</div><div class="total">Pas de recette</div>
+        <div class="muted small">Cet objet ne se fabrique pas pour ta faction (${faction === "asmodian" ? "Asmodiens" : "Élyséens"}). Change de serveur si tu joues l'autre faction.</div></div>
         <div class="side">${buy ? `<span class="label">Achat direct</span><span class="num">${kinah(buy.p * qty)}</span>` : ""}</div></div>` + chartSlot(g) + missingList(S, g);
       BASKET = { rows: [], credit: 0 };
       decorate(g);
@@ -390,12 +455,16 @@
       <div class="side">${side}</div></div>`;
     html += chartSlot(g);
     if (haveKey && !usedOwned) html += `<p class="notice info">Le calcul n'utilise pas ton « ${esc(GROUPS.get(haveKey).name)} » : il est moins cher de partir d'un autre chemin.</p>`;
-    if (steps.some(s => s.t === "combo")) html += `<p class="notice info">Le coût compte les combos en moyenne : l'objet éclatant sort une fois sur ${Math.round(1 / steps.find(s => s.t === "combo").p)}. Tu peux avoir plus ou moins de chance.</p>`;
+    const cs = steps.filter(s => s.t === "combo");
+    if (cs.some(s => s.mode === "upgrade")) html += `<p class="notice info">Combos comptés en moyenne : à chaque craft d'équipement, l'objet éclatant sort directement ${Math.round(cs[0].p * 100)} % du temps, ce qui t'évite l'étape d'amélioration suivante. Les quantités marquées « ≈ » sont des moyennes : prévois un peu plus si la chance n'est pas au rendez-vous.</p>`;
+    if (cs.some(s => s.mode === "retry")) html += `<p class="notice info">Certaines étapes demandent de recommencer jusqu'au combo : l'objet éclatant sort une fois sur ${Math.round(1 / cs.find(s => s.mode === "retry").p)} en moyenne. Tu peux avoir plus ou moins de chance.</p>`;
 
 
     // Liste de courses : tout ce qu'il faut acheter, regroupé par matériau.
-    const rows = [...acc.map.values()].filter(l => l.t !== "owned").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
+    const rows = [...acc.map.values()].filter(l => l.t !== "owned" && l.t !== "farm").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
     const ownedRows = [...acc.map.values()].filter(l => l.t === "owned");
+    const farmRows = [...acc.map.values()].filter(l => l.t === "farm");
+    if (farmRows.length) html += `<p class="notice">Ce coût n'inclut pas ${farmRows.length} objet${farmRows.length > 1 ? "s" : ""} qui ne ${farmRows.length > 1 ? "sont" : "est"} pas en vente sur ce serveur : ${farmRows.map(l => esc(nameOf(l.id))).join(", ")}. Il faut ${farmRows.length > 1 ? "les" : "l'"}obtenir en jeu (butin, quête, récolte…).</p>`;
     const fmtQ = q => Number.isInteger(q) ? nf.format(q) : "≈ " + nf.format(Math.ceil(q));
     html += `<div class="shop"><div class="section-title"><h2>Liste de courses</h2><span class="btn-row">${PROXY && complete && rows.some(l => l.t === "buy") ? `<button class="btn small-btn" id="alertCost" type="button">Alerte Discord</button>` : ""}<button class="btn small-btn" id="copyList" type="button">Copier la liste</button></span></div>
       <p class="muted small">Tout ce qu'il faut acheter pour fabriquer « ${esc(g.name)} »${qty > 1 ? " ×" + qty : ""}${haveKey ? " en partant de ce que tu as" : ""}.</p>
@@ -404,6 +473,7 @@
         <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}${PROXY && l.t === "buy" ? `<button class="bell" type="button" data-palert="${l.id}" title="Me prévenir quand ce matériau passe sous un prix" aria-label="Alerte bonne affaire sur ${esc(nameOf(l.id))}">alerte</button>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
         <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
         <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td><td class="r trend" ${l.t === "buy" ? `data-trend="${l.id}"` : ""}></td></tr>`).join("")}
+      ${farmRows.map(l => `<tr class="farm"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="tag">à obtenir en jeu</span><span class="en">${esc(enOf(l.id))} · pas en vente sur ce serveur</span></td><td></td><td class="r muted">non compté</td><td class="trend"></td></tr>`).join("")}
       ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td><td class="trend"></td></tr>`).join("")}
       ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td><td class="trend"></td></tr>` : ""}
       </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td><td class="trend"></td></tr></tfoot></table></div></div>`;
@@ -414,7 +484,7 @@
       fixed: rows.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0), credit: acc.credit, sell: [],
       url: location.origin + location.pathname + location.search,
     } : null;
-    window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
+    window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), ...farmRows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + " (à obtenir en jeu)"), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
     out.innerHTML = html;
     decorate(g);
   }
@@ -444,24 +514,36 @@
       <div class="seg" role="group" aria-label="Période">${[1, 7, 30].map(d => `<button type="button" data-days="${d}" aria-pressed="${d === histDays}">${d === 1 ? "24 h" : d + " j"}</button>`).join("")}</div></div>
       <div id="chartBody" class="chart-body"><p class="muted small">Chargement de l'historique…</p></div></div>`;
   }
+  // Historique avec cache : une seule requête en cours par objet, et un échec n'est pas gardé
+  // (il sera retenté au prochain affichage), pour ne jamais rester bloqué sur une réponse vide.
+  const INFLIGHT = new Map();
   async function getHistory(ids, days) {
-    const want = [...new Set(ids)].filter(id => !HIST.has(server.id + "|" + days + "|" + id));
-    for (let i = 0; i < want.length; i += 30) {
-      const chunk = want.slice(i, i + 30);
-      try {
-        const res = await fetch(`${PROXY}/history?server=${server.id}&days=${days}&items=${chunk.join(",")}`);
-        const d = res.ok ? await res.json() : null;
-        for (const id of chunk) {
-          const h = d && d.items ? d.items[id] : null;
-          if (h && h.obs) h.obs.sort((a, b) => a[0] - b[0]);
-          HIST.set(server.id + "|" + days + "|" + id, h || null);
+    const sid = server.id, key = id => sid + "|" + days + "|" + id;
+    const want = [...new Set(ids)].filter(id => !HIST.has(key(id)) && !INFLIGHT.has(key(id)));
+    for (let i = 0; i < want.length; i += 12) {
+      const chunk = want.slice(i, i + 12);
+      const job = (async () => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`${PROXY}/history?server=${sid}&days=${days}&items=${chunk.join(",")}`);
+            if (!res.ok) throw new Error(res.status);
+            const d = await res.json();
+            for (const id of chunk) {
+              const h = d && d.items ? d.items[id] : null;
+              if (h && h.obs) { h.obs.sort((a, b) => a[0] - b[0]); HIST.set(key(id), h); }
+              else if (d && d.items && id in d.items) HIST.set(key(id), { obs: [] });
+            }
+            return;
+          } catch (e) { await new Promise(r => setTimeout(r, 800)); }
         }
-      } catch (e) {
-        for (const id of chunk) HIST.set(server.id + "|" + days + "|" + id, null);
-      }
+      })();
+      for (const id of chunk) INFLIGHT.set(key(id), job);
+      job.finally(() => { for (const id of chunk) INFLIGHT.delete(key(id)); });
     }
-    return Object.fromEntries(ids.map(id => [id, HIST.get(server.id + "|" + days + "|" + id)]));
+    await Promise.all([...new Set(ids)].map(id => INFLIGHT.get(key(id))).filter(Boolean));
+    return Object.fromEntries(ids.map(id => [id, HIST.get(key(id)) || null]));
   }
+
   function stats(values, current) {
     if (!values.length) return null;
     const avg = values.reduce((a, b) => a + b, 0) / values.length;
@@ -637,7 +719,7 @@
     const node = expand(S, r[1], r[2], new Set(), { t: "craft", r }, new Map());
     const acc = { map: new Map(), credit: 0, fee: 0 }; leaves(node, acc);
     const ls = [...acc.map.values()];
-    if (ls.some(l => l.t === "missing")) return;
+    if (ls.some(l => l.t === "missing" || l.t === "farm")) return;
     const sell = row.combo && row.combo.price != null ? [[r[1], (1 - row.combo.p) * r[2]], [row.combo.id, row.combo.p * r[11][1]]] : [[r[1], r[2]]];
     openAlert({
       kind: "profit", label: row.g.name, current: row.profit,
@@ -722,7 +804,7 @@
       html += `<tr><td>${gdot(id)}${esc(g.name)}${lvlTag(g.lvl)}${PROXY && p ? `<button class="bell" type="button" data-palert="${id}" title="Me prévenir quand cet objet passe sous un prix" aria-label="Alerte bonne affaire sur ${esc(g.name)}">alerte</button>` : ""}<span class="en">${esc(g.en)}${npc}</span></td>
         <td class="r"><input id="p-${id}" data-id="${id}" inputmode="numeric" value="${v}" placeholder="aucune annonce" class="${overrides[id] != null ? "edited" : ""}" aria-label="Prix de ${esc(g.name)}"></td>
         <td class="r num muted">${p && p[1] != null ? p[1] : "—"}</td>
-        <td class="r">${bc ? `<span class="num">${kinah(bc.unit)}</span><br><button class="linkish" type="button" data-goal="${esc(g.key)}">Détail</button>` : `<span class="muted">—</span>`}</td></tr>`;
+        <td class="r">${bc && bc.unit >= FARM / 10 ? `<span class="muted small">matériaux pas en vente</span><br><button class="linkish" type="button" data-goal="${esc(g.key)}">Détail</button>` : bc ? `<span class="num">${kinah(bc.unit)}</span><br><button class="linkish" type="button" data-goal="${esc(g.key)}">Détail</button>` : `<span class="muted">—</span>`}</td></tr>`;
     }
     if (!gs.length) html += `<tr><td colspan="4" class="muted">Aucun objet ne correspond.</td></tr>`;
     else if (total > gs.length) html += `<tr><td colspan="4" class="muted small">${total - gs.length} autres résultats : précise ta recherche.</td></tr>`;
@@ -781,7 +863,7 @@
       const listings = PR.prices[out] ? PR.prices[out][1] : null;
       if ((listings || 0) < minL) continue;
       if (q.length) { const hay = norm(g.name) + " " + norm(g.en) + " " + g.lvl; if (!q.every(w => hay.includes(w))) continue; }
-      const cost = S.inputsCost(r); if (!isFinite(cost) || cost <= 0) continue;
+      const cost = S.inputsCost(r); if (!isFinite(cost) || cost <= 0 || cost >= FARM / 10) continue;
       let revenue = price * (1 - TAX) * r[2], combo = null;
       if (r[11] && r[11][2] > 0 && $("optCombo").checked) {
         const p = r[11][2] / 10000, cp = mkt(r[11][0]);
@@ -866,8 +948,8 @@
   $("server").addEventListener("change", () => loadServer($("server").value));
 
   async function boot() {
-    const o = load("atelier-opts", null);
-    if (o) { $("optCombo").checked = o.combo !== false; $("optResale").checked = o.resale !== false; $("optNpc").checked = o.npc !== false; }
+    const o = load("atelier-opts2", null);
+    if (o) { $("optCombo").checked = o.combo !== false; $("optResale").checked = o.resale === true; $("optNpc").checked = o.npc !== false; }
     renderCats();
     try {
       const [cat, srv] = await Promise.all([fetch("data/catalog.json", { cache: "no-cache" }).then(r => r.json()), fetch("data/servers.json", { cache: "no-cache" }).then(r => r.json())]);
@@ -891,5 +973,7 @@
     await loadServer(server.id);
     setInterval(setFreshness, 60000);
   }
+  // Outil de diagnostic (console du navigateur) : window.__atelier
+  window.__atelier = { state: () => ({ CAT, PR, GROUPS, GROUP_OF, RECIPES, UPG, server, faction, goalKey, haveKey }), solve, bestCraft, expand, leaves, pick: key => pickGoal(GROUPS.get(key)), compute };
   boot();
 })();
