@@ -66,6 +66,8 @@
   // Objet introuvable à l'achat (ni HV, ni PNJ, ni recette) : il faudra l'obtenir en jeu.
   // On lui donne un coût énorme pour que le calcul ne l'utilise que s'il n'y a pas d'autre chemin.
   const FARM = 1e12;
+  // Les Kinah demandés par certaines recettes apparaissent comme un « objet » : 1 Kinah = 1 Kinah.
+  const isKinah = id => { const it = CAT.items[id]; return !!it && it[3] === "Currency" && /^Gold/.test(it[4] || ""); };
   // Toutes les façons d'utiliser une recette : craft simple, ou combo vers l'objet supérieur.
   //  - « retry » : on recommence jusqu'au combo (en moyenne 1/p essais) ; les objets normaux obtenus
   //    peuvent être revendus si l'option est cochée.
@@ -99,6 +101,7 @@
     const c = id => { const v = cost.get(id); return v == null ? Infinity : v; };
     for (const id of Object.keys(CAT.items)) {
       const m = mkt(id), n = npcPrice(id), k = Number(id);
+      if (isKinah(k)) { cost.set(k, 1); how.set(k, { t: "kinah" }); continue; }
       if (n != null && (m == null || n <= m)) { cost.set(k, n); how.set(k, { t: "npc" }); }
       else if (m != null) { cost.set(k, m); how.set(k, { t: "buy" }); }
     }
@@ -180,7 +183,7 @@
       const more = { id, qty: extra, t: m == null ? "farm" : "buy", unit: m, total: m == null ? 0 : m * extra, kids: [], notes: [] };
       return { id, qty, t: "group", total: more.total, kids: left > 0 ? [node, more] : [more], notes: [] };
     }
-    if (h.t === "buy" || h.t === "npc") { node.total = S.c(id) * qty; node.unit = S.c(id); return node; }
+    if (h.t === "buy" || h.t === "npc" || h.t === "kinah") { node.total = S.c(id) * qty; node.unit = S.c(id); return node; }
     if (stack.has(id)) { node.t = "missing"; node.total = NaN; return node; }
     stack.add(id);
     const r = h.r;
@@ -461,7 +464,8 @@
 
 
     // Liste de courses : tout ce qu'il faut acheter, regroupé par matériau.
-    const rows = [...acc.map.values()].filter(l => l.t !== "owned" && l.t !== "farm").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
+    const kinahFee = [...acc.map.values()].filter(l => l.t === "kinah").reduce((a, l) => a + l.total, 0);
+    const rows = [...acc.map.values()].filter(l => l.t !== "owned" && l.t !== "farm" && l.t !== "kinah").sort((a, b) => (a.t === "missing") - (b.t === "missing") || b.total - a.total);
     const ownedRows = [...acc.map.values()].filter(l => l.t === "owned");
     const farmRows = [...acc.map.values()].filter(l => l.t === "farm");
     if (farmRows.length) html += `<p class="notice">Ce coût n'inclut pas ${farmRows.length} objet${farmRows.length > 1 ? "s" : ""} qui ne ${farmRows.length > 1 ? "sont" : "est"} pas en vente sur ce serveur : ${farmRows.map(l => esc(nameOf(l.id))).join(", ")}. Il faut ${farmRows.length > 1 ? "les" : "l'"}obtenir en jeu (butin, quête, récolte…).</p>`;
@@ -473,15 +477,16 @@
         <td>${gdot(l.id)}${esc(nameOf(l.id))}${l.t === "npc" ? `<span class="tag npc">marchand PNJ</span>` : ""}${PROXY && l.t === "buy" ? `<button class="bell" type="button" data-palert="${l.id}" title="Me prévenir quand ce matériau passe sous un prix" aria-label="Alerte bonne affaire sur ${esc(nameOf(l.id))}">alerte</button>` : ""}<span class="en">${esc(enOf(l.id))}</span></td>
         <td class="r num">${l.t === "missing" ? "—" : kinah(l.unit)}</td>
         <td class="r num">${l.t === "missing" ? "prix manquant" : kinah(l.total)}</td><td class="r trend" ${l.t === "buy" ? `data-trend="${l.id}"` : ""}></td></tr>`).join("")}
+      ${kinahFee > 0 ? `<tr><td></td><td>Kinah demandés par les recettes<span class="en">frais de fabrication</span></td><td></td><td class="r num">${kinah(kinahFee)}</td><td class="trend"></td></tr>` : ""}
       ${farmRows.map(l => `<tr class="farm"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="tag">à obtenir en jeu</span><span class="en">${esc(enOf(l.id))} · pas en vente sur ce serveur</span></td><td></td><td class="r muted">non compté</td><td class="trend"></td></tr>`).join("")}
       ${ownedRows.map(l => `<tr class="owned"><td class="r num qcol">${fmtQ(l.qty)}</td><td>${gdot(l.id)}${esc(nameOf(l.id))}<span class="en">déjà possédé</span></td><td></td><td class="r">0</td><td class="trend"></td></tr>`).join("")}
       ${acc.credit > 0 ? `<tr class="credit"><td></td><td>Revente des objets normaux obtenus sans combo<span class="en">taxe de 12 % déduite</span></td><td></td><td class="r num">− ${kinah(acc.credit)}</td><td class="trend"></td></tr>` : ""}
       </tbody><tfoot><tr><td></td><td>Total</td><td></td><td class="r num">${complete ? kinah(total) : "incomplet"}</td><td class="trend"></td></tr></tfoot></table></div></div>`;
-    BASKET = { rows: rows.filter(l => l.t !== "missing").map(l => ({ id: l.id, qty: l.qty, unit: l.unit, t: l.t })), credit: acc.credit };
+    BASKET = { rows: rows.filter(l => l.t !== "missing").map(l => ({ id: l.id, qty: l.qty, unit: l.unit, t: l.t })).concat(kinahFee > 0 ? [{ id: 0, qty: 1, unit: kinahFee, t: "kinah" }] : []), credit: acc.credit };
     ALERT_COST = complete ? {
       kind: "cost", label: g.name + (qty > 1 ? " ×" + qty : ""), current: total,
       buy: rows.filter(l => l.t === "buy").map(l => [l.id, Math.round(l.qty * 1000) / 1000]),
-      fixed: rows.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0), credit: acc.credit, sell: [],
+      fixed: rows.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0) + kinahFee, credit: acc.credit, sell: [],
       url: location.origin + location.pathname + location.search,
     } : null;
     window.__shopText = [g.name + (qty > 1 ? " x" + qty : "") + " — " + (server ? server.name : ""), ...rows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + (l.t === "missing" ? " (prix manquant)" : " = " + kinah(l.total))), ...farmRows.map(l => fmtQ(l.qty) + " × " + nameOf(l.id) + " (à obtenir en jeu)"), "Total : " + (complete ? kinah(total) + " Kinah" : "incomplet")].join("\n");
@@ -724,7 +729,7 @@
     openAlert({
       kind: "profit", label: row.g.name, current: row.profit,
       buy: ls.filter(l => l.t === "buy").map(l => [l.id, Math.round(l.qty * 1000) / 1000]),
-      fixed: ls.filter(l => l.t === "npc").reduce((a, l) => a + l.total, 0), credit: 0,
+      fixed: ls.filter(l => l.t === "npc" || l.t === "kinah").reduce((a, l) => a + l.total, 0), credit: 0,
       sell: sell.map(([i, w]) => [i, Math.round(w * 1000) / 1000]),
       url: location.origin + location.pathname + "?s=" + server.id + "&goal=" + r[1],
     });
