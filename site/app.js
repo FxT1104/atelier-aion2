@@ -925,7 +925,7 @@
   const XCATS = [["all", "Tout"], ["Equip", "Équipement"], ["Misc", "Matériaux"], ["Usable", "Consommables"]];
   const median = a => { const s = a.slice().sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : NaN; };
   const liquid = v => v && (v[1] == null || v[1] >= 2);
-  const pctNum = p => (p > 0 ? "+" : p < 0 ? "−" : "") + Math.abs(Math.round(p * 100)) + " %";
+  const pctNum = p => (p > 0 ? "+" : p < 0 ? "−" : "") + Math.abs(Math.round(p * 100)) + "\u202f%";
   const pctWords = p => Math.round(p * 100) === 0 ? "au même prix" : Math.abs(Math.round(p * 100)) + " % " + (p > 0 ? "plus cher" : "moins cher");
   async function loadCross() {
     if (XS && Date.now() - XS.at < 10 * 60e3) return XS;
@@ -990,7 +990,7 @@
       html += `<tr class="${r.me ? "me" : ""}"><td class="r num muted">${r.pct != null ? rank : ""}</td>
         <td>${esc(r.s.name)}${r.me ? `<span class="tag">ton serveur</span>` : ""}<span class="en">${FACN[r.s.faction] || ""}</span></td>
         <td><div class="xcell"><span class="xbar" aria-hidden="true"><span class="xfill ${cls}" style="width:${w.toFixed(1)}%;${r.pct < 0 ? "right" : "left"}:50%"></span></span>
-          <span class="xpct ${cls}">${r.me ? "référence" : r.pct == null ? `<span class="muted">pas assez d'objets</span>` : `${pctNum(r.pct)}<span class="xw"> ${r.pct > 0.005 ? "plus cher" : r.pct < -0.005 ? "moins cher" : ""}</span>`}</span></div></td>
+          <span class="xpct ${cls}">${r.me ? `<span class="xw">référence</span>` : r.pct == null ? `<span class="muted">pas assez d'objets</span>` : `${pctNum(r.pct)}<span class="xw"> ${r.pct > 0.005 ? "plus cher" : r.pct < -0.005 ? "moins cher" : ""}</span>`}</span></div></td>
         <td class="r num muted">${r.me ? "" : r.n}</td></tr>`;
     }
     $("xtable").innerHTML = html + "</tbody>";
