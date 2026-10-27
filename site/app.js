@@ -936,15 +936,36 @@
     el.textContent = "Prix relevés " + (mins < 1 ? "à l'instant" : mins < 90 ? "il y a " + mins + " min" : "le " + d.toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
     el.className = "chip " + (mins > 60 ? "warn" : "ghost");
   }
+  // Prix en direct via le relais (5 min de retard côté A2-Tracker) ; sinon, le relevé publié avec le site.
+  async function fetchPrices(sid) {
+    if (PROXY) {
+      try {
+        const res = await fetch(`${PROXY}/prices?server=${sid}`);
+        if (res.ok) { const d = await res.json(); if (d && d.ok && d.prices) return { server: sid, asOf: d.asOf, prices: d.prices, live: true }; }
+      } catch (e) {}
+    }
+    try {
+      const res = await fetch("data/prices/" + sid + ".json", { cache: "no-cache" });
+      if (res.ok) return await res.json();
+    } catch (e) {}
+    return null;
+  }
+  // Mise à jour automatique toutes les 2 minutes, sans gêner une saisie ou une fenêtre ouverte.
+  async function autoRefresh() {
+    if (!server || document.hidden) return;
+    const sid = server.id;
+    const d = await fetchPrices(sid);
+    if (!d || sid !== server.id || !d.asOf || d.asOf === PR.asOf) return;
+    PR = d; setFreshness();
+    const busy = !goalList.hidden || document.querySelector("dialog[open]") || (document.activeElement && /INPUT|SELECT/.test(document.activeElement.tagName));
+    if (!busy) refreshView();
+  }
   async function loadServer(id) {
     server = SERVERS.find(s => s.id === id) || SERVERS.find(s => s.id === DEFAULT_SERVER) || SERVERS[0];
     faction = server.faction;
     save("atelier-server", server.id);
     $("server").value = server.id;
-    try {
-      const res = await fetch("data/prices/" + server.id + ".json", { cache: "no-cache" });
-      PR = res.ok ? await res.json() : { prices: {}, asOf: null };
-    } catch (e) { PR = { prices: {}, asOf: null }; }
+    PR = (await fetchPrices(server.id)) || { prices: {}, asOf: null };
     buildIndex(); setFreshness();
     if (goalKey && !GROUPS.get(goalKey)) goalKey = null;
     fillHave();
@@ -977,6 +998,8 @@
     if (hid && GROUP_OF.get(hid)) haveKey = GROUP_OF.get(hid);
     await loadServer(server.id);
     setInterval(setFreshness, 60000);
+    setInterval(autoRefresh, 120000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) autoRefresh(); });
   }
   // Outil de diagnostic (console du navigateur) : window.__atelier
   window.__atelier = { state: () => ({ CAT, PR, GROUPS, GROUP_OF, RECIPES, UPG, server, faction, goalKey, haveKey }), solve, bestCraft, expand, leaves, pick: key => pickGoal(GROUPS.get(key)), compute };

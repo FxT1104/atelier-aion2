@@ -28,6 +28,11 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === "/history" && request.method === "GET") return await historyRoute(url, ctx, cors);
+      if (url.pathname === "/prices" && request.method === "GET") {
+        const server = url.searchParams.get("server") || "";
+        if (!/^\d{1,6}$/.test(server)) return json({ ok: false, error: "bad_request" }, 400, cors);
+        return json({ ok: true, ...(await serverQuotes(server)) }, 200, { ...cors, "Cache-Control": "public, max-age=60" });
+      }
       if (url.pathname === "/alerts" && request.method === "POST") {
         if (!allowed) return json({ ok: false, error: "origin" }, 403, cors);
         return await createAlert(request, env, cors);
@@ -89,8 +94,9 @@ async function history(item, server, days, ctx) {
 }
 
 // ================= Prix actuels d'un serveur =================
-async function serverPrices(server) {
-  const key = new Request(`https://cache.atelier-aion2/v1/quotes?server=${server}`);
+// Prix actuels d'un serveur, gardés 90 secondes en cache (A2-Tracker les publie avec 5 min de retard).
+async function serverQuotes(server) {
+  const key = new Request(`https://cache.atelier-aion2/v2/quotes?server=${server}`);
   const cache = caches.default;
   const hit = await cache.match(key);
   if (hit) return hit.json();
@@ -98,10 +104,19 @@ async function serverPrices(server) {
   if (!res.ok) throw new Error("prix indisponibles (" + res.status + ")");
   const raw = await res.json();
   const prices = {};
-  for (const q of raw.quotes || []) if (q.price != null) prices[q.itemId] = Math.round(Number(q.price));
-  const data = { asOf: raw.asOf || null, prices };
-  await cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": "max-age=300" } }));
+  for (const q of raw.quotes || []) {
+    if (q.price == null) continue;
+    prices[q.itemId] = [Math.round(Number(q.price)), q.listings == null ? null : Number(q.listings), q.status === "current" ? 1 : 0];
+  }
+  const data = { server, asOf: raw.asOf || null, delaySeconds: raw.delaySeconds || 0, prices };
+  await cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": "max-age=90" } }));
   return data;
+}
+async function serverPrices(server) {
+  const q = await serverQuotes(server);
+  const prices = {};
+  for (const [id, v] of Object.entries(q.prices)) prices[id] = v[0];
+  return { asOf: q.asOf, prices };
 }
 
 // Valeur suivie par l'alerte : coût de la liste de courses, ou bénéfice d'un craft.
