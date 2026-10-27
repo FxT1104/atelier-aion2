@@ -831,12 +831,12 @@
   });
   $("resetEdits").addEventListener("click", () => { overrides = {}; save("atelier-overrides", overrides); renderPrices(); });
 
-  const TABS = [["tab-calc", "view-calc"], ["tab-rent", "view-rent"], ["tab-prix", "view-prix"]];
+  const TABS = [["tab-calc", "view-calc"], ["tab-rent", "view-rent"], ["tab-prix", "view-prix"], ["tab-srv", "view-srv"]];
   function showTab(tab) {
     for (const [t, v] of TABS) { $(t).setAttribute("aria-selected", String(t === tab)); $(v).hidden = t !== tab; }
-    if (tab === "tab-prix") renderPrices(); else if (tab === "tab-rent") renderProfit(); else compute();
+    refreshView();
   }
-  function refreshView() { if (!$("view-prix").hidden) renderPrices(); else if (!$("view-rent").hidden) renderProfit(); else compute(); }
+  function refreshView() { if (!$("view-prix").hidden) renderPrices(); else if (!$("view-rent").hidden) renderProfit(); else if (!$("view-srv").hidden) renderServers(); else compute(); }
   for (const [t] of TABS) $(t).addEventListener("click", () => showTab(t));
 
   // ================= Onglet rentabilité =================
@@ -917,6 +917,144 @@
     const b = e.target.closest("button[data-goal]"); if (!b) return;
     const g = GROUPS.get(b.dataset.goal); if (!g) return;
     showTab("tab-calc"); pickGoal(g);
+  });
+
+  // ================= Onglet serveurs : écarts de prix entre serveurs =================
+  // Les prix de tous les serveurs viennent du relevé publié avec le site (un petit fichier par serveur).
+  let XS = null, xsLoading = null, xsCat = "all", xsOpen = null, XROWS = [];
+  const XCATS = [["all", "Tout"], ["Equip", "Équipement"], ["Misc", "Matériaux"], ["Usable", "Consommables"]];
+  const median = a => { const s = a.slice().sort((x, y) => x - y), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : NaN; };
+  const liquid = v => v && (v[1] == null || v[1] >= 2);
+  const pctNum = p => (p > 0 ? "+" : p < 0 ? "−" : "") + Math.abs(Math.round(p * 100)) + " %";
+  const pctWords = p => Math.round(p * 100) === 0 ? "au même prix" : Math.abs(Math.round(p * 100)) + " % " + (p > 0 ? "plus cher" : "moins cher");
+  async function loadCross() {
+    if (XS && Date.now() - XS.at < 10 * 60e3) return XS;
+    if (!xsLoading) xsLoading = (async () => {
+      const res = await Promise.all(SERVERS.map(s => fetch("data/prices/" + s.id + ".json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null)));
+      const P = new Map(); let asOf = null;
+      res.forEach((d, i) => { if (d && d.prices && Object.keys(d.prices).length) { P.set(String(SERVERS[i].id), d.prices); if (d.asOf && (!asOf || d.asOf < asOf)) asOf = d.asOf; } });
+      return { at: Date.now(), P, asOf };
+    })();
+    try { XS = await xsLoading; } finally { xsLoading = null; }
+    return XS;
+  }
+  function renderXCats() {
+    $("xcats").innerHTML = XCATS.map(([k, label]) => `<button type="button" data-cat="${k}" aria-pressed="${k === xsCat}">${label}</button>`).join("");
+  }
+  async function renderServers() {
+    if (!CAT || !server) return;
+    if (!$("xcats").innerHTML) renderXCats();
+    if (!XS) { $("xsummary").innerHTML = `<p class="muted small">Chargement des prix des ${SERVERS.length} serveurs…</p>`; $("xtable").innerHTML = ""; $("xitems").innerHTML = ""; }
+    let X;
+    try { X = await loadCross(); } catch (e) { $("xsummary").innerHTML = `<p class="notice">Les prix des autres serveurs n'ont pas pu être chargés. Réessaie dans un instant.</p>`; return; }
+    if ($("view-srv").hidden) return;
+    const me = String(server.id), mine = X.P.get(me);
+    if (!mine) { $("xsummary").innerHTML = `<p class="notice">Pas de prix publiés pour ${esc(server.name)} en ce moment.</p>`; $("xtable").innerHTML = ""; $("xitems").innerHTML = ""; return; }
+    const allScope = $("xscope").value === "all";
+    const pool = SERVERS.filter(s => X.P.has(String(s.id)) && (allScope || s.faction === server.faction));
+    const others = pool.filter(s => String(s.id) !== me);
+    const okCat = id => xsCat === "all" || item(id)[3] === xsCat;
+
+    // 1. Classement des serveurs : écart typique avec ton serveur.
+    const rows = pool.map(s => {
+      const sid = String(s.id), p = X.P.get(sid), logs = [];
+      if (sid !== me) for (const [id, v] of Object.entries(mine)) { const w = p[id]; if (okCat(id) && liquid(v) && liquid(w)) logs.push(Math.log(w[0] / v[0])); }
+      return { s, me: sid === me, n: logs.length, pct: sid === me ? 0 : logs.length >= 8 ? Math.exp(median(logs)) - 1 : null };
+    });
+    // Ton serveur face à un serveur moyen (médiane des autres, objet par objet).
+    const zl = [];
+    for (const [id, v] of Object.entries(mine)) {
+      if (!okCat(id) || !liquid(v)) continue;
+      const o = others.map(s => X.P.get(String(s.id))[id]).filter(liquid).map(w => w[0]);
+      if (o.length >= 3) zl.push(Math.log(v[0] / median(o)));
+    }
+    const vsMed = zl.length >= 8 ? Math.exp(median(zl)) - 1 : null;
+    const known = rows.filter(r => !r.me && r.pct != null).sort((a, b) => a.pct - b.pct);
+    const scopeTxt = allScope ? "des serveurs d'Europe" : `des serveurs ${FACN[server.faction] === "Asmodiens" ? "asmodiens" : "élyséens"} d'Europe`;
+    const when = X.asOf ? new Date(X.asOf).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
+    let sum = "";
+    if (vsMed != null) sum += `<p class="xlead"><b>${esc(server.name)}</b> est <b class="${vsMed > 0.005 ? "neg" : vsMed < -0.005 ? "pos" : ""}">${pctWords(vsMed)}</b> qu'un serveur moyen ${scopeTxt}.</p>`;
+    if (known.length) {
+      const lo = known[0], hi = known[known.length - 1];
+      sum += `<p class="small">Le moins cher : <b>${esc(lo.s.name)}</b> (${pctWords(lo.pct)} que ${esc(server.name)}). Le plus cher : <b>${esc(hi.s.name)}</b> (${pctWords(hi.pct)}).${when ? ` <span class="muted">Relevé de ${when}, ${zl.length} objets comparés.</span>` : ""}</p>`;
+    }
+    $("xsummary").innerHTML = sum || `<div class="empty">Pas assez d'objets en commun pour comparer ce type d'objets.</div>`;
+    const order = [...rows].sort((a, b) => (a.pct == null) - (b.pct == null) || (a.pct ?? 0) - (b.pct ?? 0));
+    const maxAbs = Math.max(0.05, ...known.map(r => Math.abs(r.pct)));
+    let html = `<thead><tr><th class="r">#</th><th>Serveur</th><th>Prix comparés à ${esc(server.name)}</th><th class="r">Objets comparés</th></tr></thead><tbody>`;
+    let rank = 0;
+    for (const r of order) {
+      if (r.pct != null) rank++;
+      const w = r.pct == null ? 0 : Math.min(50, Math.abs(r.pct) / maxAbs * 50);
+      const cls = r.pct > 0.005 ? "neg" : r.pct < -0.005 ? "pos" : "";
+      html += `<tr class="${r.me ? "me" : ""}"><td class="r num muted">${r.pct != null ? rank : ""}</td>
+        <td>${esc(r.s.name)}${r.me ? `<span class="tag">ton serveur</span>` : ""}<span class="en">${FACN[r.s.faction] || ""}</span></td>
+        <td><div class="xcell"><span class="xbar" aria-hidden="true"><span class="xfill ${cls}" style="width:${w.toFixed(1)}%;${r.pct < 0 ? "right" : "left"}:50%"></span></span>
+          <span class="xpct ${cls}">${r.me ? "référence" : r.pct == null ? `<span class="muted">pas assez d'objets</span>` : `${pctNum(r.pct)}<span class="xw"> ${r.pct > 0.005 ? "plus cher" : r.pct < -0.005 ? "moins cher" : ""}</span>`}</span></div></td>
+        <td class="r num muted">${r.me ? "" : r.n}</td></tr>`;
+    }
+    $("xtable").innerHTML = html + "</tbody>";
+    renderXItems(X, pool, others, me, mine, okCat);
+  }
+
+  // 2. Objet par objet : ton prix face aux autres serveurs.
+  function renderXItems(X, pool, others, me, mine, okCat) {
+    const q = norm($("xsearch").value).trim().split(/\s+/).filter(Boolean);
+    const ids = new Set();
+    for (const s of pool) for (const id of Object.keys(X.P.get(String(s.id)))) if (okCat(id)) ids.add(id);
+    let list = [];
+    for (const id of ids) {
+      const [fr, en] = item(id), lvl = lvlOf(id);
+      if (q.length) { const hay = norm(fr) + " " + norm(en) + (lvl ? " " + lvl : ""); if (!q.every(w => hay.includes(w))) continue; }
+      const quotes = pool.map(s => ({ s, v: X.P.get(String(s.id))[id] })).filter(x => x.v);
+      if (quotes.length < 3) continue;
+      const my = mine[id] ? mine[id][0] : null;
+      const o = quotes.filter(x => String(x.s.id) !== me).map(x => x.v[0]);
+      const med = o.length ? median(o) : null;
+      const cheapest = quotes.slice().sort((a, b) => a.v[0] - b.v[0])[0];
+      list.push({ id, name: fr, lvl, my, med, gap: my != null && med ? my / med - 1 : null, cheapest, quotes });
+    }
+    const sort = $("xsort").value;
+    if (sort === "name") list.sort((a, b) => a.name.localeCompare(b.name, "fr") || b.lvl - a.lvl);
+    else list.sort((a, b) => (a.gap == null) - (b.gap == null) || (sort === "dear" ? (b.gap ?? 0) - (a.gap ?? 0) : (a.gap ?? 0) - (b.gap ?? 0)));
+    const total = list.length; list = list.slice(0, 60); XROWS = list;
+    let html = `<thead><tr><th>Objet</th><th class="r">Chez toi</th><th class="r">Serveur moyen</th><th class="r">Écart</th><th>Le moins cher</th><th></th></tr></thead><tbody>`;
+    for (const r of list) {
+      const cls = r.gap == null ? "" : r.gap > 0.005 ? "neg" : r.gap < -0.005 ? "pos" : "";
+      const ch = r.cheapest, chMe = String(ch.s.id) === me;
+      html += `<tr><td>${gdot(r.id)}${esc(r.name)}${lvlTag(r.lvl)}<span class="en">en vente sur ${r.quotes.length} serveurs</span></td>
+        <td class="r num">${r.my != null ? kinah(r.my) : `<span class="muted small">pas en vente</span>`}</td>
+        <td class="r num muted">${kinah(r.med)}</td>
+        <td class="r num ${cls}">${r.gap != null ? pctNum(r.gap) : "—"}</td>
+        <td>${chMe ? `<b>${esc(ch.s.name)}</b> <span class="muted small">(chez toi)</span>` : esc(ch.s.name)}<span class="en num">${kinah(ch.v[0])}${ch.v[1] != null ? ` · ${ch.v[1]} annonce${ch.v[1] > 1 ? "s" : ""}` : ""}</span></td>
+        <td class="r"><button class="linkish" type="button" data-xopen="${r.id}" aria-expanded="${xsOpen === r.id}">${xsOpen === r.id ? "Masquer" : "Tous les serveurs"}</button></td></tr>`;
+      if (xsOpen === r.id) {
+        const qs = r.quotes.slice().sort((a, b) => a.v[0] - b.v[0]);
+        html += `<tr class="xdetail"><td colspan="6"><ol class="xlist">${qs.map(x => {
+          const isMe = String(x.s.id) === me, d = r.my != null && !isMe ? x.v[0] / r.my - 1 : null;
+          return `<li class="${isMe ? "me" : ""}"><span>${esc(x.s.name)}${allFac(pool) ? ` <span class="muted small">${x.s.faction === "asmodian" ? "A" : "É"}</span>` : ""}</span><span class="num">${kinah(x.v[0])}</span><span class="num small ${d == null ? "muted" : d > 0.005 ? "neg" : d < -0.005 ? "pos" : "muted"}">${isMe ? "toi" : d != null ? pctNum(d) : ""}</span></li>`;
+        }).join("")}</ol></td></tr>`;
+      }
+    }
+    if (!list.length) html += `<tr><td colspan="6" class="muted">Aucun objet ne correspond.</td></tr>`;
+    else if (total > list.length) html += `<tr><td colspan="6" class="muted small">${total - list.length} autres objets : précise ta recherche.</td></tr>`;
+    $("xitems").innerHTML = html + "</tbody>";
+  }
+  const allFac = pool => new Set(pool.map(s => s.faction)).size > 1;
+  $("xcats").addEventListener("click", e => {
+    const b = e.target.closest("button[data-cat]"); if (!b) return;
+    xsCat = b.dataset.cat;
+    $("xcats").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.cat === xsCat)));
+    renderServers();
+  });
+  $("xscope").addEventListener("change", renderServers);
+  $("xsort").addEventListener("change", renderServers);
+  let xTimer = 0;
+  $("xsearch").addEventListener("input", () => { clearTimeout(xTimer); xTimer = setTimeout(renderServers, 150); });
+  $("xitems").addEventListener("click", e => {
+    const b = e.target.closest("button[data-xopen]"); if (!b) return;
+    xsOpen = xsOpen === b.dataset.xopen ? null : b.dataset.xopen;
+    renderServers();
   });
 
   // ================= Serveur et adresse =================

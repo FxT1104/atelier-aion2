@@ -216,3 +216,29 @@ a.btn { text-decoration: none; color: inherit; display: inline-block; }
 .bell { margin-left: 8px; border: 1px solid var(--line); background: transparent; color: var(--plum); border-radius: 999px; padding: 0 8px; font-size: .72rem; line-height: 1.6; vertical-align: middle; }
 .bell:hover { background: var(--plum-soft); border-color: transparent; }
 .shoplist tr.farm td { color: var(--warn); }
+
+/* Onglet serveurs */
+.srv-filters { display: grid; grid-template-columns: minmax(0, 20em); }
+.xh { font-size: 1.3rem; margin-top: 6px; }
+#xsummary p { margin: 0 0 4px; }
+.xlead { font-size: 1.05rem; }
+#xsummary .pos, .xtable .pos { color: var(--good); }
+#xsummary .neg, .xtable .neg { color: var(--bad); }
+.xtable tr.me td { background: var(--plum-soft); }
+.xtable .en { display: block; font-size: .78rem; color: var(--muted); }
+.xcell { display: flex; align-items: center; gap: 12px; }
+.xbar { position: relative; flex: 1 1 auto; min-width: 120px; max-width: 320px; height: 10px; background: var(--sunk); border-radius: 999px; }
+.xbar::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
+.xfill { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: var(--muted); }
+.xfill.pos { background: var(--good); }
+.xfill.neg { background: var(--bad); }
+.xpct { font-family: var(--f-mono); font-variant-numeric: tabular-nums; min-width: 10.5em; white-space: nowrap; }
+.xw { font-family: var(--f-body); font-size: .8rem; }
+.xdetail td { background: var(--sunk); }
+.xlist { list-style: none; margin: 0; padding: 4px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(16em, 1fr)); gap: 2px 18px; counter-reset: x; }
+.xlist li { display: grid; grid-template-columns: minmax(0, 1fr) auto 4.2em; gap: 8px; padding: 2px 6px; border-radius: 6px; align-items: baseline; }
+.xlist li .num:last-child { text-align: right; }
+.xlist li.me { background: var(--plum-soft); font-weight: 600; }
+.xlist .pos { color: var(--good); }
+.xlist .neg { color: var(--bad); }
+@media (max-width: 600px) { .xw { display: none; } .xpct { min-width: 4.5em; } .xbar { min-width: 60px; } .srv-filters { grid-template-columns: 1fr; } }
