@@ -34,7 +34,12 @@ jobs:
           key: levels-${{ steps.day.outputs.d }}
           restore-keys: levels-
       - name: Récupérer recettes et prix (A2-Tracker)
-        run: node scripts/build-data.mjs
+        run: |
+          set -o pipefail
+          if ! node scripts/build-data.mjs 2>&1 | tee build.log; then
+            echo "::error title=A2-Tracker::$(grep -v '^\s*at ' build.log | tail -n 4 | tr '\n' ' ' | cut -c1-600)"
+            exit 1
+          fi
         env:
           A2T_HEADERS: ${{ secrets.A2T_HEADERS }}
       - name: Forcer le rechargement du code après chaque modification
