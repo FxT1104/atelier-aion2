@@ -1074,8 +1074,9 @@
     if (!PR.asOf) { el.textContent = "Pas de prix pour ce serveur"; el.className = "chip warn"; return; }
     const d = new Date(PR.asOf);
     const mins = Math.round((Date.now() - d.getTime()) / 60000);
-    el.textContent = "Prix relevés " + (mins < 1 ? "à l'instant" : mins < 90 ? "il y a " + mins + " min" : "le " + d.toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
-    el.className = "chip " + (mins > 60 ? "warn" : "ghost");
+    el.textContent = "Prix relevés " + (mins < 1 ? "à l'instant" : mins < 90 ? "il y a " + mins + " min" : "le " + d.toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })) + (PR.source === "aion2.exchange" ? " · aion2.exchange" : "");
+    el.title = PR.source === "aion2.exchange" ? "A2-Tracker est indisponible : prix relevés par aion2.exchange, une fois par heure." : "";
+    el.className = "chip " + (mins > (PR.source === "aion2.exchange" ? 90 : 60) ? "warn" : "ghost");
   }
   // Prix en direct via le relais (5 min de retard côté A2-Tracker) ; sinon, le relevé publié avec le site.
   async function fetchPrices(sid) {

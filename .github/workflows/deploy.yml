@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     outputs:
       skip: ${{ steps.data.outputs.skip }}
     steps:
@@ -39,7 +39,9 @@ jobs:
         id: data
         run: |
           set -o pipefail
-          if node scripts/build-data.mjs 2>&1 | tee build.log; then exit 0; fi
+          code=0; node scripts/build-data.mjs 2>&1 | tee build.log || code=$?
+          if [ "$code" = 0 ]; then exit 0; fi
+          if [ "$code" = 3 ]; then echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
           msg="$(grep -v '^\s*at ' build.log | grep -v '^Node.js' | tail -n 3 | tr '\n' ' ' | cut -c1-500)"
           if grep -qE 'access_restricted|403 Forbidden|429' build.log; then
             # A2-Tracker refuse l'accès : on garde la version déjà en ligne, sans échec (pas d'e-mail toutes les 30 min).
