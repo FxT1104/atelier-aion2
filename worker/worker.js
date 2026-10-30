@@ -1,10 +1,11 @@
 // Relais Cloudflare d'Atelier Aion 2.
-// 1. /history : historique des prix A2-Tracker pour le site (le navigateur ne peut pas lire A2-Tracker directement).
+// 1. /history : historique des prix (A2-Tracker, ou aion2.exchange en secours) pour le site.
 // 2. /alerts  : alertes Discord. Chaque heure, le relais recalcule le coût des listes de courses enregistrées
 //    (ou le bénéfice d'un craft) avec les prix actuels et prévient sur Discord quand le seuil est franchi.
 const ALLOWED_ORIGINS = ["https://fxt1104.github.io"];
 const SITE_PREFIX = "https://fxt1104.github.io/atelier-aion2/";
 const A2T = "https://a2-tracker.com";
+const EX = "https://aion2.exchange/api"; // secours quand A2-Tracker refuse l'accès (relevé une fois par heure)
 const UA = "atelier-aion2-relais (+https://fxt1104.github.io/atelier-aion2/)";
 const CACHE_SECONDS = 600;
 const MAX_ITEMS = 30;
@@ -70,10 +71,16 @@ async function history(item, server, days, ctx) {
   const cache = caches.default;
   const hit = await cache.match(key);
   if (hit) return hit.json();
-  let data;
+  let data, ttl = CACHE_SECONDS;
   try {
     const res = await fetch(`${A2T}/api.history.ashx?item=${item}&server=${server}&days=${days}`, { headers: { Accept: "application/json", "User-Agent": UA } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      data = await exHistory(item, server, days);
+      if (!data) return null;
+      ttl = 1800; // relevés horaires : inutile de redemander plus souvent
+      ctx.waitUntil(cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${ttl}` } })));
+      return data;
+    }
     const raw = await res.json();
     // Version compacte : [horodatage en secondes, prix, annonces].
     // Avant « hourly.until », A2-Tracker donne un prix le plus bas par heure ; ensuite, chaque relevé.
@@ -89,7 +96,44 @@ async function history(item, server, days, ctx) {
   } catch (e) {
     return null;
   }
-  ctx.waitUntil(cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${CACHE_SECONDS}` } })));
+  ctx.waitUntil(cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${ttl}` } })));
+  return data;
+}
+
+// Numéro du serveur chez aion2.exchange (écrit par la mise à jour du site dans servers.json ; sinon 10000 + numéro).
+async function exServerId(server) {
+  try {
+    const idx = await sitePublished("data/servers.json", 3600);
+    const s = (idx.servers || []).find(x => String(x.id) === String(server));
+    if (s && s.exId) return s.exId;
+  } catch (e) {}
+  return 10000 + Number(server);
+}
+async function exHistory(item, server, days) {
+  try {
+    const sid = await exServerId(server);
+    const range = days === "1" ? "24h" : days + "d";
+    const res = await fetch(`${EX}/items/${item}/prices?server=${sid}&range=${range}`, { headers: { Accept: "application/json", "User-Agent": UA } });
+    if (!res.ok) return null;
+    const raw = await res.json();
+    const obs = [];
+    for (const p of raw.points || []) if (p.low != null) obs.push([Math.round(Date.parse(p.ts) / 1000), Math.round(Number(p.low)), p.listings == null ? null : Number(p.listings)]);
+    obs.sort((a, b) => a[0] - b[0]);
+    return { obs, source: "aion2.exchange" };
+  } catch (e) {
+    return null;
+  }
+}
+// Fichier publié avec le site (prix relevés par la mise à jour), gardé en cache.
+async function sitePublished(path, seconds) {
+  const key = new Request(`https://cache.atelier-aion2/v2/site/${path}`);
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  if (hit) return hit.json();
+  const res = await fetch(SITE_PREFIX + path, { headers: { "User-Agent": UA } });
+  if (!res.ok) throw new Error("fichier du site indisponible (" + res.status + ")");
+  const data = await res.json();
+  await cache.put(key, new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${seconds}` } }));
   return data;
 }
 
@@ -101,7 +145,12 @@ async function serverQuotes(server) {
   const hit = await cache.match(key);
   if (hit) return hit.json();
   const res = await fetch(`${A2T}/api.crafting.ashx?quotes=1&server=${server}`, { headers: { Accept: "application/json", "User-Agent": UA } });
-  if (!res.ok) throw new Error("prix indisponibles (" + res.status + ")");
+  if (!res.ok) {
+    // A2-Tracker refuse : on reprend les prix publiés avec le site (aion2.exchange, une fois par heure).
+    const d = await sitePublished(`data/prices/${server}.json`, 300);
+    if (!d || !d.prices) throw new Error("prix indisponibles (" + res.status + ")");
+    return { server, asOf: d.asOf || null, delaySeconds: 0, source: d.source || "site", prices: d.prices };
+  }
   const raw = await res.json();
   const prices = {};
   for (const q of raw.quotes || []) {

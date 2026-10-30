@@ -196,10 +196,10 @@ if (a2ok) {
         await sleep(250);
       }
       await writeFile(new URL("prices/" + s.id + ".json", OUT), JSON.stringify({ server: s.id, source: "aion2.exchange", asOf, delaySeconds: 0, prices }));
-      index.servers.push({ ...s, asOf, priced: Object.keys(prices).length });
+      index.servers.push({ ...s, exId: sid, asOf, priced: Object.keys(prices).length });
     } catch (e) {
       console.warn("Prix indisponibles pour " + s.name + " (" + s.id + " → " + sid + ") : " + e.message);
-      index.servers.push({ ...s, asOf: null, priced: 0 });
+      index.servers.push({ ...s, exId: sid, asOf: null, priced: 0 });
     }
     await sleep(config.delayBetweenServersMs || 400);
   }

@@ -1083,7 +1083,7 @@
     if (PROXY) {
       try {
         const res = await fetch(`${PROXY}/prices?server=${sid}`);
-        if (res.ok) { const d = await res.json(); if (d && d.ok && d.prices) return { server: sid, asOf: d.asOf, prices: d.prices, live: true }; }
+        if (res.ok) { const d = await res.json(); if (d && d.ok && d.prices) return { server: sid, asOf: d.asOf, prices: d.prices, source: d.source || "A2-Tracker", live: true }; }
       } catch (e) {}
     }
     try {
