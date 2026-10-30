@@ -12,14 +12,17 @@ const HEADERS = {
   ...(process.env.A2T_HEADERS ? JSON.parse(process.env.A2T_HEADERS) : {}),
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+process.on("unhandledRejection", e => { console.log("::error title=A2-Tracker::" + String(e && e.message || e).replace(/\r?\n/g, " ")); process.exit(1); });
 
 async function getJson(path, tries = 3) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
       const res = await fetch(BASE + path, { headers: HEADERS });
-      if (!res.ok) throw new Error(res.status + " " + res.statusText);
-      const data = await res.json();
+      const text = await res.text();
+      if (!res.ok) throw new Error(res.status + " " + res.statusText + " · " + (res.headers.get("server") || "") + " · " + text.slice(0, 160).replace(/\s+/g, " "));
+      let data;
+      try { data = JSON.parse(text); } catch (e) { throw new Error("réponse non JSON (" + (res.headers.get("content-type") || "?") + ") · " + text.slice(0, 160).replace(/\s+/g, " ")); }
       if (data && data.ok === false) throw new Error("ok:false");
       return data;
     } catch (e) {
