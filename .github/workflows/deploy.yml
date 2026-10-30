@@ -20,6 +20,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      skip: ${{ steps.data.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,23 +36,35 @@ jobs:
           key: levels-${{ steps.day.outputs.d }}
           restore-keys: levels-
       - name: Récupérer recettes et prix (A2-Tracker)
+        id: data
         run: |
           set -o pipefail
-          if ! node scripts/build-data.mjs 2>&1 | tee build.log; then
-            echo "::error title=A2-Tracker::$(grep -v '^\s*at ' build.log | tail -n 4 | tr '\n' ' ' | cut -c1-600)"
-            exit 1
+          if node scripts/build-data.mjs 2>&1 | tee build.log; then exit 0; fi
+          msg="$(grep -v '^\s*at ' build.log | grep -v '^Node.js' | tail -n 3 | tr '\n' ' ' | cut -c1-500)"
+          if grep -qE 'access_restricted|403 Forbidden|429' build.log; then
+            # A2-Tracker refuse l'accès : on garde la version déjà en ligne, sans échec (pas d'e-mail toutes les 30 min).
+            relay=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H 'Origin: https://fxt1104.github.io' "$(jq -r .proxy site/config.json)/prices?server=2302" || true)
+            echo "::warning title=A2-Tracker refuse l'accès::$msg (relais Cloudflare : HTTP $relay). Le site garde les derniers prix publiés."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "::error title=A2-Tracker::$msg"
+          exit 1
         env:
           A2T_HEADERS: ${{ secrets.A2T_HEADERS }}
       - name: Forcer le rechargement du code après chaque modification
+        if: steps.data.outputs.skip != '1'
         run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::7}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::7}\"/" site/index.html
       - uses: actions/configure-pages@v5
+        if: steps.data.outputs.skip != '1'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.data.outputs.skip != '1'
         with:
           path: site
 
   deploy:
     needs: build
+    if: needs.build.outputs.skip != '1'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
